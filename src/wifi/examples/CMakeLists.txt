@@ -19,6 +19,30 @@ build_lib_example(
 )
 
 build_lib_example(
+  NAME wifi-channel-proxy-test
+  SOURCE_FILES wifi-channel-proxy-test.cc
+  LIBRARIES_TO_LINK
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libwifi}
+    ${libinternet}
+    ${libapplications}
+)
+
+build_lib_example(
+  NAME wifi-channel-proxy-advanced-test
+  SOURCE_FILES wifi-channel-proxy-advanced-test.cc
+  LIBRARIES_TO_LINK
+    ${libcore}
+    ${libnetwork}
+    ${libmobility}
+    ${libwifi}
+    ${libinternet}
+    ${libapplications}
+)
+
+build_lib_example(
   NAME wifi-manager-example
   SOURCE_FILES wifi-manager-example.cc
   LIBRARIES_TO_LINK
