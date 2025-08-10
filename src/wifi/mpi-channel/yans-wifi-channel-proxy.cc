@@ -28,7 +28,7 @@ TypeId
 YansWifiChannelProxy::GetTypeId()
 {
     static TypeId tid = TypeId("ns3::YansWifiChannelProxy")
-                            .SetParent<Channel>()
+                            .SetParent<YansWifiChannel>()
                             .SetGroupName("Wifi")
                             .AddConstructor<YansWifiChannelProxy>();
     return tid;
@@ -42,9 +42,6 @@ YansWifiChannelProxy::YansWifiChannelProxy()
 {
     NS_LOG_FUNCTION(this);
     LogMethodCall("Constructor");
-
-    // Create the real channel instance that will do the actual work
-    m_realChannel = CreateObject<YansWifiChannel>();
 }
 
 YansWifiChannelProxy::~YansWifiChannelProxy()
@@ -78,7 +75,7 @@ YansWifiChannelProxy::GetNDevices() const
     m_getNDevicesCallCount++;
     LogMethodCall("GetNDevices", "Call #" + std::to_string(m_getNDevicesCallCount));
 
-    std::size_t result = m_realChannel->GetNDevices();
+    std::size_t result = YansWifiChannel::GetNDevices();
     LogMethodCall("GetNDevices", "Returning: " + std::to_string(result));
     return result;
 }
@@ -91,7 +88,7 @@ YansWifiChannelProxy::GetDevice(std::size_t i) const
                   "Call #" + std::to_string(m_getDeviceCallCount) +
                       ", Index: " + std::to_string(i));
 
-    Ptr<NetDevice> result = m_realChannel->GetDevice(i);
+    Ptr<NetDevice> result = YansWifiChannel::GetDevice(i);
 
     std::string deviceInfo = "NULL";
     if (result)
@@ -126,12 +123,12 @@ YansWifiChannelProxy::Add(Ptr<YansWifiPhy> phy)
 
     LogMethodCall("Add", "Call #" + std::to_string(m_addCallCount) + ", PHY: " + phyInfo);
 
-    // Forward to real channel
-    m_realChannel->Add(phy);
+    // Call base class implementation
+    YansWifiChannel::Add(phy);
 
     LogMethodCall("Add",
                   "PHY added successfully. Total devices: " +
-                      std::to_string(m_realChannel->GetNDevices()));
+                      std::to_string(YansWifiChannel::GetNDevices()));
 }
 
 void
@@ -140,8 +137,8 @@ YansWifiChannelProxy::SetPropagationLossModel(const Ptr<PropagationLossModel> lo
     std::string lossInfo = loss ? loss->GetTypeId().GetName() : "NULL";
     LogMethodCall("SetPropagationLossModel", "Model: " + lossInfo);
 
-    // Forward to real channel
-    m_realChannel->SetPropagationLossModel(loss);
+    // Call base class implementation
+    YansWifiChannel::SetPropagationLossModel(loss);
 }
 
 void
@@ -150,8 +147,8 @@ YansWifiChannelProxy::SetPropagationDelayModel(const Ptr<PropagationDelayModel> 
     std::string delayInfo = delay ? delay->GetTypeId().GetName() : "NULL";
     LogMethodCall("SetPropagationDelayModel", "Model: " + delayInfo);
 
-    // Forward to real channel
-    m_realChannel->SetPropagationDelayModel(delay);
+    // Call base class implementation
+    YansWifiChannel::SetPropagationDelayModel(delay);
 }
 
 void
@@ -186,12 +183,12 @@ YansWifiChannelProxy::Send(Ptr<YansWifiPhy> sender, Ptr<const WifiPpdu> ppdu, dB
         "Send",
         "Call #" + std::to_string(m_sendCallCount) + ", Sender: " + senderInfo +
             ", TxPower: " + std::to_string(txPower) + " dBm" + ", PPDU: " + ppduInfo +
-            ", Total devices on channel: " + std::to_string(m_realChannel->GetNDevices()));
+            ", Total devices on channel: " + std::to_string(YansWifiChannel::GetNDevices()));
 
-    // Forward to real channel
-    m_realChannel->Send(sender, ppdu, txPower);
+    // Call base class implementation
+    YansWifiChannel::Send(sender, ppdu, txPower);
 
-    LogMethodCall("Send", "Transmission forwarded to real channel");
+    LogMethodCall("Send", "Transmission forwarded to base class");
 }
 
 int64_t
@@ -199,7 +196,7 @@ YansWifiChannelProxy::AssignStreams(int64_t stream)
 {
     LogMethodCall("AssignStreams", "Starting stream: " + std::to_string(stream));
 
-    int64_t result = m_realChannel->AssignStreams(stream);
+    int64_t result = YansWifiChannel::AssignStreams(stream);
 
     LogMethodCall("AssignStreams", "Assigned " + std::to_string(result) + " streams");
     return result;

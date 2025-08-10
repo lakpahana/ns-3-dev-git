@@ -53,16 +53,16 @@ class YansWifiChannel : public Channel
      *
      * @param phy the YansWifiPhy to be added to the PHY list
      */
-    void Add(Ptr<YansWifiPhy> phy);
+    virtual void Add(Ptr<YansWifiPhy> phy);
 
     /**
      * @param loss the new propagation loss model.
      */
-    void SetPropagationLossModel(const Ptr<PropagationLossModel> loss);
+    virtual void SetPropagationLossModel(const Ptr<PropagationLossModel> loss);
     /**
      * @param delay the new propagation delay model.
      */
-    void SetPropagationDelayModel(const Ptr<PropagationDelayModel> delay);
+    virtual void SetPropagationDelayModel(const Ptr<PropagationDelayModel> delay);
 
     /**
      * @param sender the PHY object from which the packet is originating.
@@ -74,7 +74,7 @@ class YansWifiChannel : public Channel
      * attempts to deliver the PPDU to all other YansWifiPhy objects
      * on the channel (except for the sender).
      */
-    void Send(Ptr<YansWifiPhy> sender, Ptr<const WifiPpdu> ppdu, dBm_u txPower) const;
+    virtual void Send(Ptr<YansWifiPhy> sender, Ptr<const WifiPpdu> ppdu, dBm_u txPower) const;
 
     /**
      * Assign a fixed random variable stream number to the random variables
@@ -85,7 +85,7 @@ class YansWifiChannel : public Channel
      *
      * @return the number of stream indices assigned by this model
      */
-    int64_t AssignStreams(int64_t stream);
+    virtual int64_t AssignStreams(int64_t stream);
 
   private:
     /**
