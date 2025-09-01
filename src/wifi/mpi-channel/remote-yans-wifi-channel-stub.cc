@@ -70,7 +70,7 @@ bool
 RemoteYansWifiChannelStub::InitializeMpi()
 {
     NS_LOG_FUNCTION(this);
-    
+
 #ifdef NS3_MPI
     if (WifiMpi::IsEnabled())
     {

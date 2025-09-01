@@ -18,6 +18,8 @@
 
 #ifdef NS3_MPI
 #pragma message("SUCCESS: WiFi MPI Processor compiling with NS3_MPI defined!")
+#include "wifi-mpi-message.h"
+
 #include "ns3/mpi-interface.h"
 #include "ns3/mpi-receiver.h"
 
@@ -115,8 +117,11 @@ WifiChannelMpiProcessor::Initialize()
     NS_LOG_INFO("Initializing WiFi Channel MPI Processor on rank " << m_systemId << " of "
                                                                    << m_systemCount);
 
+    // Set up MPI message reception for WiFi transmissions
+    SetupMpiReception();
+
     m_initialized = true;
-    LogActivity("INIT", "WiFi Channel MPI Processor initialized successfully");
+    LogActivity("INIT", "WiFi Channel MPI Processor initialized with message reception");
 
     return true;
 }
@@ -314,6 +319,70 @@ bool
 WifiChannelMpiProcessor::IsDeviceRegistered(uint32_t deviceId) const
 {
     return m_remoteDevices.find(deviceId) != m_remoteDevices.end();
+}
+
+void
+WifiChannelMpiProcessor::SetupMpiReception()
+{
+    NS_LOG_FUNCTION(this);
+
+    if (!MpiInterface::IsEnabled())
+    {
+        NS_LOG_WARN("MPI not enabled - cannot set up message reception");
+        return;
+    }
+
+    // In ns-3 MPI, message reception is handled automatically by the simulator
+    // calling ReceiveMessages() periodically. We don't need to set up explicit
+    // callbacks like in other MPI implementations.
+
+    NS_LOG_INFO("MPI reception configured - using ns-3 polling pattern");
+    LogActivity("MPI_SETUP", "Reception configured for WiFi channel processor");
+}
+
+void
+WifiChannelMpiProcessor::HandleMpiMessage(Ptr<Packet> packet)
+{
+    NS_LOG_FUNCTION(this << packet);
+
+    // For now, we'll focus on getting the basic structure working
+    // The full WiFi MPI message handling will be implemented in Phase 2.2.3
+
+    if (!packet)
+    {
+        NS_LOG_WARN("Received null MPI packet");
+        return;
+    }
+
+    NS_LOG_DEBUG("Received WiFi MPI packet of size: " << packet->GetSize());
+    LogActivity("MPI_RECEIVE", "Received packet from device rank");
+
+    // TODO: In Phase 2.2.3, implement full message parsing and processing
+    // For now, just acknowledge receipt of the message
+}
+
+void
+WifiChannelMpiProcessor::ProcessDeviceRegistration(const WifiMpiDeviceRegisterMessage& message)
+{
+    NS_LOG_FUNCTION(this);
+
+    // Simplified device registration for Phase 2.2.2
+    // Full implementation will be added in Phase 2.2.3
+
+    NS_LOG_INFO("Device registration received - implementation pending Phase 2.2.3");
+    LogActivity("DEVICE_REG", "Registration message received");
+}
+
+void
+WifiChannelMpiProcessor::ProcessTransmissionRequest(const WifiMpiTxRequestMessage& message)
+{
+    NS_LOG_FUNCTION(this);
+
+    // Simplified transmission processing for Phase 2.2.2
+    // Full implementation will be added in Phase 2.2.3
+
+    NS_LOG_INFO("Transmission request received - implementation pending Phase 2.2.3");
+    LogActivity("TX_REQUEST", "Transmission message received");
 }
 
 #else

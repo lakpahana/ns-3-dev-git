@@ -18,6 +18,8 @@
 #include "ns3/vector.h"
 
 #ifdef NS3_MPI
+#include "wifi-mpi-message.h"
+
 #include <cmath>
 #include <map>
 #include <vector>
@@ -199,6 +201,29 @@ class WifiChannelMpiProcessor : public Object
      * \param rxInfo The reception information
      */
     void SendReceptionNotification(const RemoteDeviceInfo& rxDevice, const ReceptionInfo& rxInfo);
+
+    /**
+     * \brief Set up MPI message reception
+     */
+    void SetupMpiReception();
+
+    /**
+     * \brief Handle incoming MPI messages
+     * \param packet The received MPI packet
+     */
+    void HandleMpiMessage(Ptr<Packet> packet);
+
+    /**
+     * \brief Process device registration message
+     * \param message The registration message
+     */
+    void ProcessDeviceRegistration(const WifiMpiDeviceRegisterMessage& message);
+
+    /**
+     * \brief Process transmission request message
+     * \param message The transmission message
+     */
+    void ProcessTransmissionRequest(const WifiMpiTxRequestMessage& message);
 
     /**
      * \brief Log processor activity
