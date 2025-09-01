@@ -214,6 +214,18 @@ class WifiChannelMpiProcessor : public Object
     void HandleMpiMessage(Ptr<Packet> packet);
 
     /**
+     * \brief Handle device registration message from packet
+     * \param packet The packet containing registration message
+     */
+    void HandleDeviceRegistrationMessage(Ptr<Packet> packet);
+
+    /**
+     * \brief Handle transmission request message from packet
+     * \param packet The packet containing transmission request message
+     */
+    void HandleTransmissionRequestMessage(Ptr<Packet> packet);
+
+    /**
      * \brief Process device registration message
      * \param message The registration message
      */
