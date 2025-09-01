@@ -134,21 +134,40 @@ struct WifiMpiTxRequestMessage
 };
 
 /**
- * \brief Message for reception notifications
+ * \brief Message for reception notifications - Enhanced for Phase 2.2.3c
  */
 struct WifiMpiRxNotificationMessage
 {
     WifiMpiMessageHeader header;
-    uint32_t targetDeviceId; //!< Target device identifier
-    uint32_t targetPhyId;    //!< Target PHY identifier
-    double rxPowerW;         //!< Received power in Watts
-    uint32_t ppduSize;       //!< Serialized PPDU size
-    uint64_t delay;          //!< Propagation delay in nanoseconds
-    // Variable-length PPDU data follows
+    uint32_t receiverDeviceId;      //!< Target device identifier for reception
+    uint32_t transmitterDeviceId;   //!< Source device that transmitted
+    uint32_t targetPhyId;           //!< Target PHY identifier
+    double rxPowerW;                //!< Received power in Watts
+    double rxPowerDbm;              //!< Received power in dBm (for convenience)
+    double pathLossDb;              //!< Path loss in dB
+    double distanceM;               //!< Distance between devices in meters
+    uint32_t frequency;             //!< Transmission frequency in Hz
+    uint64_t propagationDelay;      //!< Propagation delay in nanoseconds
+    uint32_t ppduSize;              //!< Serialized PPDU size (0 for simplified mode)
+    uint64_t transmissionTimestamp; //!< Original transmission timestamp
+    // Variable-length PPDU data follows (optional for Phase 2.2.3c)
 
-    void Serialize(Buffer::Iterator& buffer, Ptr<const WifiPpdu> ppdu) const;
+    void Serialize(Buffer::Iterator& buffer, Ptr<const WifiPpdu> ppdu = nullptr) const;
     void Deserialize(Buffer::Iterator& buffer, Ptr<WifiPpdu>& ppdu);
-    static uint32_t GetSerializedSize(uint32_t ppduSize);
+    static uint32_t GetSerializedSize(uint32_t ppduSize = 0);
+
+    // Phase 2.2.3c helper methods
+    void SetSimplifiedMode(uint32_t rxDeviceId,
+                           uint32_t txDeviceId,
+                           double rxPowerDbm,
+                           double pathLoss,
+                           double distance,
+                           uint32_t freq);
+
+    bool IsSimplifiedMode() const
+    {
+        return ppduSize == 0;
+    }
 };
 
 /**

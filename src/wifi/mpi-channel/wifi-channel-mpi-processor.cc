@@ -68,7 +68,8 @@ WifiChannelMpiProcessor::WifiChannelMpiProcessor()
     : m_initialized(false),
       m_systemId(MpiInterface::GetSystemId()),
       m_systemCount(MpiInterface::GetSize()),
-      m_deviceCounter(0)
+      m_deviceCounter(0),
+      m_sequenceNumber(0)
 {
     NS_LOG_FUNCTION(this);
     NS_LOG_INFO("WifiChannelMpiProcessor created on rank " << m_systemId);
@@ -215,6 +216,7 @@ WifiChannelMpiProcessor::ProcessTransmission(uint32_t transmitterId,
         rxInfo.receiverId = rxDeviceId;
         rxInfo.transmitterId = transmitterId;
         rxInfo.rxPowerDbm = rxPowerDbm;
+        rxInfo.txPowerDbm = txPowerDbm; // Add transmission power for path loss calculation
         rxInfo.delaySeconds = delaySeconds;
         rxInfo.frequency = frequency;
 
@@ -275,16 +277,81 @@ WifiChannelMpiProcessor::SendReceptionNotification(const RemoteDeviceInfo& rxDev
 {
     NS_LOG_FUNCTION(this << rxDevice.deviceId << rxInfo.rxPowerDbm);
 
-    // For now, just log the notification
-    // In full implementation, this would send actual MPI message
-    NS_LOG_INFO("Sending RX notification to device " << rxDevice.deviceId << " on rank "
-                                                     << rxDevice.rank
-                                                     << ": RX Power=" << rxInfo.rxPowerDbm << "dBm"
-                                                     << ", Delay=" << rxInfo.delaySeconds << "s");
+    try
+    {
+        // Phase 2.2.3c: Send real MPI RX notification message
+        WifiMpiRxNotificationMessage rxNotificationMsg;
 
-    LogActivity("RX_NOTIFY",
-                "Device " + std::to_string(rxDevice.deviceId) +
-                    " Power=" + std::to_string(rxInfo.rxPowerDbm) + "dBm");
+        // Set up message header
+        rxNotificationMsg.header.messageType = WIFI_MPI_RX_NOTIFICATION;
+        rxNotificationMsg.header.messageSize = sizeof(WifiMpiRxNotificationMessage);
+        rxNotificationMsg.header.sequenceNumber = GetNextSequenceNumber();
+        rxNotificationMsg.header.sourceRank = MpiInterface::GetSystemId();
+        rxNotificationMsg.header.targetRank = rxDevice.rank;
+        rxNotificationMsg.header.timestamp = Simulator::Now().GetNanoSeconds();
+        rxNotificationMsg.header.checksum = 0; // Calculate if needed
+        rxNotificationMsg.header.reserved = 0;
+
+        // Set up RX notification details - Enhanced for Phase 2.2.3c
+        rxNotificationMsg.receiverDeviceId = rxDevice.deviceId;
+        rxNotificationMsg.transmitterDeviceId = rxInfo.transmitterId;
+        rxNotificationMsg.targetPhyId = 0; // Default PHY for now
+        rxNotificationMsg.rxPowerW =
+            std::pow(10.0, (rxInfo.rxPowerDbm - 30.0) / 10.0); // dBm to Watts
+        rxNotificationMsg.rxPowerDbm = rxInfo.rxPowerDbm;
+
+        // Calculate additional propagation metrics
+        Vector3D txPos = GetDevicePosition(rxInfo.transmitterId);
+        double distance = CalculateDistance(txPos, rxDevice.position);
+        double pathLossDb = rxInfo.txPowerDbm - rxInfo.rxPowerDbm; // Assuming txPowerDbm in rxInfo
+
+        rxNotificationMsg.pathLossDb = pathLossDb;
+        rxNotificationMsg.distanceM = distance;
+        rxNotificationMsg.frequency = rxInfo.frequency;
+        rxNotificationMsg.propagationDelay =
+            static_cast<uint64_t>(rxInfo.delaySeconds * 1e9); // Convert to ns
+        rxNotificationMsg.ppduSize = 0;                       // Simplified mode for Phase 2.2.3c
+        rxNotificationMsg.transmissionTimestamp = Simulator::Now().GetNanoSeconds();
+
+        // Create packet and send via MPI
+        Ptr<Packet> packet = Create<Packet>(reinterpret_cast<const uint8_t*>(&rxNotificationMsg),
+                                            sizeof(WifiMpiRxNotificationMessage));
+
+        // Send MPI message to device rank
+        Ptr<MpiReceiver> mpiReceiver =
+            rxDevice.rank == MpiInterface::GetSystemId() ? nullptr : Create<MpiReceiver>();
+
+        if (mpiReceiver && rxDevice.rank != MpiInterface::GetSystemId())
+        {
+            // Send to remote rank - provide current simulation time
+            Time currentTime = Simulator::Now();
+            MpiInterface::SendPacket(packet, currentTime, rxDevice.rank, 0);
+
+            NS_LOG_INFO("Sent RX notification to device "
+                        << rxDevice.deviceId << " on rank " << rxDevice.rank
+                        << ": RX Power=" << rxInfo.rxPowerDbm << "dBm"
+                        << ", Distance=" << distance << "m"
+                        << ", Path Loss=" << pathLossDb << "dB");
+        }
+        else
+        {
+            NS_LOG_DEBUG("Skipping MPI send to same rank " << rxDevice.rank);
+        }
+
+        LogActivity("RX_NOTIFY_SENT",
+                    "Device " + std::to_string(rxDevice.deviceId) +
+                        " Rank=" + std::to_string(rxDevice.rank) +
+                        " Power=" + std::to_string(rxInfo.rxPowerDbm) + "dBm" +
+                        " Distance=" + std::to_string(distance) + "m");
+    }
+    catch (const std::exception& e)
+    {
+        NS_LOG_ERROR("Error sending RX notification to device " << rxDevice.deviceId << ": "
+                                                                << e.what());
+        LogActivity("RX_NOTIFY_ERROR",
+                    "Failed to send to device " + std::to_string(rxDevice.deviceId) + ": " +
+                        std::string(e.what()));
+    }
 }
 
 void
@@ -293,6 +360,24 @@ WifiChannelMpiProcessor::LogActivity(const std::string& action, const std::strin
     // Simple logging without complex time checks
     NS_LOG_INFO("WiFi Channel MPI [" << action << "] " << details << " at "
                                      << Simulator::Now().GetNanoSeconds() << "ns");
+}
+
+uint32_t
+WifiChannelMpiProcessor::GetNextSequenceNumber()
+{
+    return ++m_sequenceNumber;
+}
+
+Vector3D
+WifiChannelMpiProcessor::GetDevicePosition(uint32_t deviceId) const
+{
+    auto it = m_remoteDevices.find(deviceId);
+    if (it != m_remoteDevices.end())
+    {
+        return it->second.position;
+    }
+    NS_LOG_WARN("Device " << deviceId << " not found, returning default position");
+    return Vector3D(0.0, 0.0, 0.0);
 }
 
 std::vector<uint32_t>
@@ -345,9 +430,6 @@ WifiChannelMpiProcessor::HandleMpiMessage(Ptr<Packet> packet)
 {
     NS_LOG_FUNCTION(this << packet);
 
-    // For now, we'll focus on getting the basic structure working
-    // The full WiFi MPI message handling will be implemented in Phase 2.2.3
-
     if (!packet)
     {
         NS_LOG_WARN("Received null MPI packet");
@@ -355,10 +437,53 @@ WifiChannelMpiProcessor::HandleMpiMessage(Ptr<Packet> packet)
     }
 
     NS_LOG_DEBUG("Received WiFi MPI packet of size: " << packet->GetSize());
-    LogActivity("MPI_RECEIVE", "Received packet from device rank");
 
-    // TODO: In Phase 2.2.3, implement full message parsing and processing
-    // For now, just acknowledge receipt of the message
+    try
+    {
+        // Copy packet data to buffer for parsing (following ns-3 MPI patterns)
+        uint32_t packetSize = packet->GetSize();
+        uint8_t* buffer = new uint8_t[packetSize];
+        packet->CopyData(buffer, packetSize);
+
+        // Parse message header first (following ns-3 MPI approach)
+        if (packetSize < sizeof(uint32_t))
+        {
+            NS_LOG_WARN("Packet too small for message header");
+            delete[] buffer;
+            return;
+        }
+
+        // Extract message type from header (first 4 bytes)
+        uint32_t messageType = *reinterpret_cast<uint32_t*>(buffer);
+
+        LogActivity("MPI_RECEIVE",
+                    "Processing message type " + std::to_string(messageType) + " size " +
+                        std::to_string(packetSize));
+
+        // Route based on message type
+        switch (static_cast<WifiMpiMessageType>(messageType))
+        {
+        case WIFI_MPI_DEVICE_REGISTER:
+            HandleDeviceRegistrationMessage(packet);
+            break;
+
+        case WIFI_MPI_TX_REQUEST:
+            HandleTransmissionRequestMessage(packet);
+            break;
+
+        default:
+            NS_LOG_WARN("Unknown WiFi MPI message type: " << messageType);
+            LogActivity("MPI_RECEIVE", "Unknown message type: " + std::to_string(messageType));
+            break;
+        }
+
+        delete[] buffer;
+    }
+    catch (const std::exception& e)
+    {
+        NS_LOG_ERROR("Error parsing WiFi MPI message: " << e.what());
+        LogActivity("MPI_RECEIVE", "Error parsing message: " + std::string(e.what()));
+    }
 }
 
 void
@@ -383,6 +508,146 @@ WifiChannelMpiProcessor::ProcessTransmissionRequest(const WifiMpiTxRequestMessag
 
     NS_LOG_INFO("Transmission request received - implementation pending Phase 2.2.3");
     LogActivity("TX_REQUEST", "Transmission message received");
+}
+
+void
+WifiChannelMpiProcessor::HandleDeviceRegistrationMessage(Ptr<Packet> packet)
+{
+    NS_LOG_FUNCTION(this << packet);
+
+    try
+    {
+        // Parse device registration message using proper packet access
+        uint32_t packetSize = packet->GetSize();
+        uint8_t* buffer = new uint8_t[packetSize];
+        packet->CopyData(buffer, packetSize);
+
+        // Parse message header
+        WifiMpiMessageHeader* header = reinterpret_cast<WifiMpiMessageHeader*>(buffer);
+
+        // Parse device registration message body
+        if (packetSize < sizeof(WifiMpiMessageHeader) + sizeof(WifiMpiDeviceRegisterMessage) -
+                             sizeof(WifiMpiMessageHeader))
+        {
+            NS_LOG_WARN("Packet too small for device registration message");
+            delete[] buffer;
+            return;
+        }
+
+        WifiMpiDeviceRegisterMessage* regMsg =
+            reinterpret_cast<WifiMpiDeviceRegisterMessage*>(buffer);
+
+        uint32_t sourceRank = header->sourceRank;
+        uint32_t deviceId = regMsg->deviceId;
+        uint32_t nodeId = regMsg->nodeId;
+
+        NS_LOG_INFO("Processing device registration from rank "
+                    << sourceRank << " deviceId " << deviceId << " nodeId " << nodeId);
+
+        // For now, register with default position - can be enhanced later to include position data
+        Vector3D position(0.0, 0.0, 0.0);
+        uint32_t assignedDeviceId = RegisterDevice(sourceRank, position);
+
+        LogActivity("DEVICE_REG_PROCESSED",
+                    "Registered device " + std::to_string(assignedDeviceId) + " from rank " +
+                        std::to_string(sourceRank) + " original deviceId " +
+                        std::to_string(deviceId) + " nodeId " + std::to_string(nodeId));
+
+        NS_LOG_INFO("Successfully registered device " << assignedDeviceId << " from rank "
+                                                      << sourceRank);
+
+        delete[] buffer;
+
+        // TODO: Send registration acknowledgment in Phase 2.2.3c
+    }
+    catch (const std::exception& e)
+    {
+        NS_LOG_ERROR("Error processing device registration message: " << e.what());
+        LogActivity("DEVICE_REG_ERROR", "Failed to process registration: " + std::string(e.what()));
+    }
+}
+
+void
+WifiChannelMpiProcessor::HandleTransmissionRequestMessage(Ptr<Packet> packet)
+{
+    NS_LOG_FUNCTION(this << packet);
+
+    try
+    {
+        // Parse transmission request message using proper packet access
+        uint32_t packetSize = packet->GetSize();
+        uint8_t* buffer = new uint8_t[packetSize];
+        packet->CopyData(buffer, packetSize);
+
+        // Parse message header
+        WifiMpiMessageHeader* header = reinterpret_cast<WifiMpiMessageHeader*>(buffer);
+
+        // Parse transmission request message body
+        if (packetSize < sizeof(WifiMpiMessageHeader) + sizeof(WifiMpiTxRequestMessage) -
+                             sizeof(WifiMpiMessageHeader))
+        {
+            NS_LOG_WARN("Packet too small for transmission request message");
+            delete[] buffer;
+            return;
+        }
+
+        WifiMpiTxRequestMessage* txMsg = reinterpret_cast<WifiMpiTxRequestMessage*>(buffer);
+
+        // Extract transmission parameters
+        uint32_t sourceRank = header->sourceRank;
+        uint32_t deviceId = txMsg->deviceId;
+        double txPowerW = txMsg->txPowerW;
+        double txPowerDbm = 10.0 * log10(txPowerW * 1000.0); // Convert W to dBm
+
+        NS_LOG_INFO("Processing transmission request from rank "
+                    << sourceRank << " deviceId " << deviceId << " power " << txPowerDbm << " dBm");
+
+        LogActivity("TX_REQ_PROCESSING",
+                    "Processing transmission from device " + std::to_string(deviceId) + " rank " +
+                        std::to_string(sourceRank) + " power " + std::to_string(txPowerDbm) +
+                        " dBm");
+
+        // Check if transmitting device is registered
+        if (IsDeviceRegistered(deviceId))
+        {
+            // Get device info for position
+            auto it = m_remoteDevices.find(deviceId);
+            if (it != m_remoteDevices.end())
+            {
+                const RemoteDeviceInfo& txDevice = it->second;
+
+                // Call existing ProcessTransmission method for propagation calculation
+                // Use 2.4 GHz as default frequency for now
+                double frequency = 2.4e9; // 2.4 GHz
+                ProcessTransmission(deviceId, txDevice.position, txPowerDbm, frequency);
+
+                LogActivity("TX_REQ_PROCESSED",
+                            "Processed transmission from device " + std::to_string(deviceId) +
+                                " at position (" + std::to_string(txDevice.position.x) + "," +
+                                std::to_string(txDevice.position.y) + "," +
+                                std::to_string(txDevice.position.z) + ")");
+
+                NS_LOG_INFO("Successfully processed transmission from device " << deviceId);
+            }
+            else
+            {
+                NS_LOG_WARN("Device " << deviceId << " registered but not found in device map");
+            }
+        }
+        else
+        {
+            NS_LOG_WARN("Transmission request from unregistered device " << deviceId);
+            LogActivity("TX_REQ_ERROR",
+                        "Transmission from unregistered device " + std::to_string(deviceId));
+        }
+
+        delete[] buffer;
+    }
+    catch (const std::exception& e)
+    {
+        NS_LOG_ERROR("Error processing transmission request message: " << e.what());
+        LogActivity("TX_REQ_ERROR", "Failed to process transmission: " + std::string(e.what()));
+    }
 }
 
 #else

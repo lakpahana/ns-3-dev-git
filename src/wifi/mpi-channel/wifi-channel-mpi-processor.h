@@ -69,6 +69,7 @@ struct ReceptionInfo
     uint32_t receiverId;    //!< ID of receiving device
     uint32_t transmitterId; //!< ID of transmitting device
     double rxPowerDbm;      //!< Received power in dBm
+    double txPowerDbm;      //!< Transmission power in dBm
     double delaySeconds;    //!< Propagation delay in seconds
     double frequency;       //!< Signal frequency in Hz
 };
@@ -244,10 +245,24 @@ class WifiChannelMpiProcessor : public Object
      */
     void LogActivity(const std::string& action, const std::string& details) const;
 
+    /**
+     * \brief Get next sequence number for message headers
+     * \return Next sequence number
+     */
+    uint32_t GetNextSequenceNumber();
+
+    /**
+     * \brief Get position of a registered device
+     * \param deviceId The device ID
+     * \return Device position
+     */
+    Vector3D GetDevicePosition(uint32_t deviceId) const;
+
     bool m_initialized;                                   //!< Whether processor is initialized
     uint32_t m_systemId;                                  //!< This rank's system ID
     uint32_t m_systemCount;                               //!< Total number of ranks
     uint32_t m_deviceCounter;                             //!< Device ID counter
+    uint32_t m_sequenceNumber;                            //!< Message sequence counter
     std::map<uint32_t, RemoteDeviceInfo> m_remoteDevices; //!< Registered remote devices
     std::map<uint32_t, Ptr<Object>> m_lossModels;         //!< Cached loss models
     std::map<uint32_t, Ptr<Object>> m_delayModels;        //!< Cached delay models
