@@ -77,9 +77,11 @@
 #include "ns3/log.h"
 #include "ns3/mobility-helper.h"
 #include "ns3/mobility-model.h"
+#include "ns3/propagation-delay-model.h"
+#include "ns3/propagation-loss-model.h"
 #include "ns3/ssid.h"
 #include "ns3/string.h"
-#include "ns3/yans-wifi-channel.h"
+#include "ns3/yans-wifi-channel-proxy.h"
 #include "ns3/yans-wifi-helper.h"
 
 using namespace ns3;
@@ -168,12 +170,21 @@ main(int argc, char* argv[])
     // ns-3 supports RadioTap and Prism tracing extensions for 802.11b
     wifiPhy.SetPcapDataLinkType(WifiPhyHelper::DLT_IEEE802_11_RADIO);
 
-    YansWifiChannelHelper wifiChannel;
-    wifiChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
-    // The below FixedRssLossModel will cause the rss to be fixed regardless
-    // of the distance between the two stations, and the transmit power
-    wifiChannel.AddPropagationLoss("ns3::FixedRssLossModel", "Rss", DoubleValue(rss));
-    wifiPhy.SetChannel(wifiChannel.Create());
+    // Create YansWifiChannelProxy for logging instead of YansWifiChannelHelper
+    std::cout << "\n=== Using YansWifiChannelProxy for logging ===" << std::endl;
+    Ptr<YansWifiChannelProxy> proxyChannel = CreateObject<YansWifiChannelProxy>();
+
+    // Set up propagation delay model
+    Ptr<ConstantSpeedPropagationDelayModel> delayModel =
+        CreateObject<ConstantSpeedPropagationDelayModel>();
+    proxyChannel->SetPropagationDelayModel(delayModel);
+
+    // Set up the fixed RSS loss model
+    Ptr<FixedRssLossModel> lossModel = CreateObject<FixedRssLossModel>();
+    lossModel->SetRss(rss);
+    proxyChannel->SetPropagationLossModel(lossModel);
+
+    wifiPhy.SetChannel(proxyChannel);
 
     // Add a mac and disable rate control
     WifiMacHelper wifiMac;
@@ -238,6 +249,12 @@ main(int argc, char* argv[])
 
     Simulator::Stop(Seconds(30));
     Simulator::Run();
+
+    // Print proxy statistics summary
+    std::cout << "\n=== Proxy Channel Activity Summary ===" << std::endl;
+    std::cout << "Total devices in channel: " << proxyChannel->GetNDevices() << std::endl;
+    std::cout << "Check the log output above for detailed method call traces." << std::endl;
+
     Simulator::Destroy();
 
     return 0;

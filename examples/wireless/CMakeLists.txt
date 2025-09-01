@@ -207,6 +207,24 @@ build_example(
 )
 
 build_example(
+  NAME mpi-wifi-stub-test
+  SOURCE_FILES mpi-wifi-stub-test.cc
+  LIBRARIES_TO_LINK ${libinternet}
+                    ${libwifi}
+                    ${libmobility}
+                    ${libapplications}
+)
+
+build_example(
+  NAME simple-mpi-stub-test2
+  SOURCE_FILES simple-mpi-stub-test2.cc
+  LIBRARIES_TO_LINK ${libinternet}
+                    ${libwifi}
+                    ${libmobility}
+                    ${libapplications}
+)
+
+build_example(
   NAME wifi-simple-interference
   SOURCE_FILES wifi-simple-interference.cc
   LIBRARIES_TO_LINK ${libinternet}
