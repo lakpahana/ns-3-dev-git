@@ -177,6 +177,8 @@ set(source_files
     mpi-channel/yans-wifi-channel-proxy.cc
     mpi-channel/remote-yans-wifi-channel-stub.cc
     mpi-channel/remote-yans-wifi-phy-stub.cc
+    mpi-channel/wifi-mpi-message.cc
+    mpi-channel/wifi-mpi-interface.cc
 )
 
 set(header_files
@@ -357,7 +359,12 @@ set(header_files
     model/wifi-spectrum-value-helper.h
     mpi-channel/yans-wifi-channel-proxy.h
     mpi-channel/remote-yans-wifi-channel-stub.h
+    model/wifi-spectrum-value-helper.h
+    mpi-channel/yans-wifi-channel-proxy.h
+    mpi-channel/remote-yans-wifi-channel-stub.h
     mpi-channel/remote-yans-wifi-phy-stub.h
+    mpi-channel/wifi-mpi-message.h
+    mpi-channel/wifi-mpi-interface.h
     test/wifi-mlo-test.h
 )
 

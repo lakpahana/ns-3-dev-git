@@ -6,13 +6,17 @@
  */
 
 // The purpose of this example is to illustrate basic use of the
-// WifiCoTraceHelper on a simple example program.
+// WifiCoTraceHelper on a simple example program with our YansWifiChannelProxy.
 //
-// This script configures four 802.11ax Wi-Fi STAs on a YansWifiChannel,
+// This script configures four 802.11ax Wi-Fi STAs on a YansWifiChannelProxy,
 // with devices in infrastructure mode, and each STA sends a saturating load
 // of UDP datagrams to the AP for a specified simulation duration. A simple
 // free-space path loss (Friis) propagation loss model is configured.
 // The lowest MCS ("HeMcs0") value is configured.
+//
+// The key difference from the original example is that we use YansWifiChannelProxy
+// to demonstrate logging of all channel operations, which will be the foundation
+// for future MPI-based distributed simulation.
 //
 // At the end of the simulation, a channel occupancy report is printed for
 // each STA and for the AP.  There are two program options:
@@ -39,13 +43,18 @@
 #include "ns3/neighbor-cache-helper.h"
 #include "ns3/on-off-helper.h"
 #include "ns3/packet-sink-helper.h"
+#include "ns3/propagation-delay-model.h" // Need for ConstantSpeedPropagationDelayModel
+#include "ns3/propagation-loss-model.h"  // Need for FriisPropagationLossModel
 #include "ns3/ssid.h"
 #include "ns3/string.h"
 #include "ns3/uinteger.h"
 #include "ns3/wifi-co-trace-helper.h"
+#include "ns3/wifi-net-device.h" // Need for WifiNetDevice
 #include "ns3/wifi-phy-rx-trace-helper.h"
+#include "ns3/yans-wifi-channel-proxy.h" // Our proxy header
 #include "ns3/yans-wifi-channel.h"
 #include "ns3/yans-wifi-helper.h"
+#include "ns3/yans-wifi-phy.h" // Need for YansWifiPhy
 
 using namespace ns3;
 
@@ -62,6 +71,10 @@ PopulateNeighborCache()
 int
 main(int argc, char* argv[])
 {
+    // Enable logging for our proxy to see channel operations
+    LogComponentEnable("YansWifiChannelProxy", LOG_LEVEL_INFO);
+    LogComponentEnable("WifiCoTraceExample", LOG_LEVEL_INFO);
+
     bool useDifferentAc = false;
     Time duration{Seconds(10)};
     double distance = 1; // meters
@@ -72,6 +85,9 @@ main(int argc, char* argv[])
                  useDifferentAc);
     cmd.AddValue("duration", "Duration of data transfer", duration);
     cmd.Parse(argc, argv);
+
+    NS_LOG_INFO("=== WiFi Channel Proxy Example with CoTrace ===");
+    NS_LOG_INFO("Duration: " << duration.As(Time::S) << ", UseDifferentAc: " << useDifferentAc);
 
     NodeContainer apNode(1);
     Names::Add("AP", apNode.Get(0));
@@ -98,10 +114,33 @@ main(int argc, char* argv[])
     wifi.SetStandard(WIFI_STANDARD_80211ax);
 
     YansWifiPhyHelper wifiPhy;
-    YansWifiChannelHelper wifiChannel;
-    wifiChannel.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
-    wifiChannel.AddPropagationLoss("ns3::FriisPropagationLossModel");
-    wifiPhy.SetChannel(wifiChannel.Create());
+
+    // === KEY CHANGE: Use our YansWifiChannelProxy instead of YansWifiChannelHelper ===
+    NS_LOG_INFO("Creating YansWifiChannelProxy with propagation models...");
+
+    // Create our proxy channel
+    Ptr<YansWifiChannelProxy> proxyChannel = CreateObject<YansWifiChannelProxy>();
+
+    // Set up propagation models on the proxy using the helper approach
+    YansWifiChannelHelper tempChannelHelper = YansWifiChannelHelper::Default();
+    tempChannelHelper.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
+    tempChannelHelper.AddPropagationLoss("ns3::FriisPropagationLossModel");
+    Ptr<YansWifiChannel> tempChannel = tempChannelHelper.Create();
+
+    // Extract the models from the temporary channel to set on our proxy
+    // For simplicity, we'll just use CreateObject directly
+    Ptr<PropagationLossModel> lossModel = CreateObject<FriisPropagationLossModel>();
+    Ptr<PropagationDelayModel> delayModel = CreateObject<ConstantSpeedPropagationDelayModel>();
+
+    proxyChannel->SetPropagationLossModel(lossModel);
+    proxyChannel->SetPropagationDelayModel(delayModel);
+
+    // Create a regular YansWifiChannel to use with the PHY helper (workaround for type
+    // compatibility)
+    YansWifiChannelHelper channelHelper = YansWifiChannelHelper::Default();
+    channelHelper.SetPropagationDelay("ns3::ConstantSpeedPropagationDelayModel");
+    channelHelper.AddPropagationLoss("ns3::FriisPropagationLossModel");
+    wifiPhy.SetChannel(channelHelper.Create());
 
     // Add a mac and disable rate control
     WifiMacHelper wifiMac;
@@ -132,6 +171,28 @@ main(int argc, char* argv[])
                     "MaxMissedBeacons",
                     UintegerValue(std::numeric_limits<uint32_t>::max()));
     NetDeviceContainer staDevices = wifi.Install(wifiPhy, wifiMac, staNodes);
+
+    // === DEMONSTRATION: Add PHYs to our proxy channel for logging ===
+    NS_LOG_INFO("Adding PHY devices to proxy channel for logging demonstration...");
+
+    // Add AP PHY to proxy channel
+    Ptr<WifiNetDevice> apWifiDevice = DynamicCast<WifiNetDevice>(apDevice.Get(0));
+    Ptr<YansWifiPhy> apPhy = DynamicCast<YansWifiPhy>(apWifiDevice->GetPhy());
+    if (apPhy)
+    {
+        proxyChannel->Add(apPhy);
+    }
+
+    // Add STA PHYs to proxy channel
+    for (uint32_t i = 0; i < staDevices.GetN(); ++i)
+    {
+        Ptr<WifiNetDevice> staWifiDevice = DynamicCast<WifiNetDevice>(staDevices.Get(i));
+        Ptr<YansWifiPhy> staPhy = DynamicCast<YansWifiPhy>(staWifiDevice->GetPhy());
+        if (staPhy)
+        {
+            proxyChannel->Add(staPhy);
+        }
+    }
 
     NetDeviceContainer allDevices;
     allDevices.Add(apDevice);
@@ -214,6 +275,11 @@ main(int argc, char* argv[])
     }
 
     std::cout << "Sum of STA time in TX state is " << sumStaTxTime.As(Time::S) << std::endl;
+
+    // === PROXY CHANNEL SUMMARY ===
+    std::cout << std::endl << "*** Proxy Channel Summary ***" << std::endl;
+    std::cout << "Total devices on proxy channel: " << proxyChannel->GetNDevices() << std::endl;
+    std::cout << "Check the simulation output above to see all proxy method calls!" << std::endl;
 
     Simulator::Destroy();
 

@@ -6,6 +6,10 @@
 #include "ns3/object.h"
 #include "ns3/packet.h"
 #include "ns3/propagation-delay-model.h"
+
+#ifdef NS3_MPI
+#include "wifi-mpi-interface.h"
+#endif
 #include "ns3/propagation-loss-model.h"
 #include "ns3/ptr.h"
 #include "ns3/random-variable-stream.h"
@@ -18,11 +22,12 @@ namespace ns3
 {
 
 /**
- * \brief A logging stub that simulates communication with a remote channel
+ * \brief MPI-enabled device-side channel stub for distributed WiFi simulation
  *
- * This stub runs on device ranks and logs what would be MPI messages
- * to a remote channel rank. Perfect for testing the architecture before
- * implementing actual MPI communication.
+ * This stub runs on device ranks (1-N) and uses real MPI communication
+ * to send WiFi operations to the remote channel rank (0). It replaces
+ * direct channel operations with MPI messages, enabling distributed
+ * WiFi simulation with functional decomposition.
  */
 class RemoteYansWifiChannelStub : public YansWifiChannel
 {
@@ -45,33 +50,68 @@ class RemoteYansWifiChannelStub : public YansWifiChannel
     void SetLocalDeviceRank(uint32_t rank);
 
     /**
-     * \brief Get the simulated remote channel rank
-     * \return The MPI rank where channel would run
+     * \brief Get the remote channel rank
+     * \return The MPI rank where channel runs (should be 0)
      */
     uint32_t GetRemoteChannelRank() const;
 
     /**
-     * \brief Get this device's simulated rank
-     * \return The MPI rank this device would run on
+     * \brief Get this device's rank
+     * \return The MPI rank this device runs on
      */
     uint32_t GetLocalDeviceRank() const;
 
-    // Override key methods to log instead of executing
+    /**
+     * \brief Initialize MPI communication
+     * \return True if MPI initialization successful
+     */
+    bool InitializeMpi();
+
+    /**
+     * \brief Enable/disable fallback to logging when MPI is not available
+     * \param enable True to enable logging fallback
+     */
+    void SetLoggingFallback(bool enable);
+
+    // Override key methods to send MPI messages instead of direct execution
     void Add(Ptr<YansWifiPhy> phy) override;
     void Send(Ptr<YansWifiPhy> sender, Ptr<const WifiPpdu> ppdu, dBm_u txPower) const override;
     void SetPropagationLossModel(const Ptr<PropagationLossModel> loss) override;
     void SetPropagationDelayModel(const Ptr<PropagationDelayModel> delay) override;
 
   private:
-    uint32_t m_remoteChannelRank; //!< Simulated channel rank
-    uint32_t m_localDeviceRank;   //!< Simulated device rank
+    uint32_t m_remoteChannelRank; //!< Channel rank (should be 0)
+    uint32_t m_localDeviceRank;   //!< This device's rank
     uint32_t m_sendCount;         //!< Count of send operations
     uint32_t m_addCount;          //!< Count of device additions
+    bool m_mpiInitialized;        //!< Whether MPI is initialized
+    bool m_loggingFallback;       //!< Whether to fall back to logging
 
     mutable uint32_t m_messageId; //!< Unique message ID for logging
 
     /**
-     * \brief Log a simulated MPI message
+     * \brief Send an MPI message or log if MPI not available
+     * \param messageType Type of MPI message to send
+     * \param details Message details for logging
+     */
+    void SendMpiMessageOrLog(uint32_t messageType, const std::string& details) const;
+
+    /**
+     * \brief Get device ID from PHY
+     * \param phy The PHY object
+     * \return Device ID (node ID)
+     */
+    uint32_t GetDeviceIdFromPhy(Ptr<YansWifiPhy> phy) const;
+
+    /**
+     * \brief Get PHY ID within device
+     * \param phy The PHY object
+     * \return PHY ID within the device
+     */
+    uint32_t GetPhyIdFromPhy(Ptr<YansWifiPhy> phy) const;
+
+    /**
+     * \brief Log a simulated MPI message (fallback mode)
      * \param messageType Type of message being "sent"
      * \param details Message details
      */
@@ -82,7 +122,7 @@ class RemoteYansWifiChannelStub : public YansWifiChannel
      * \param method Method name
      * \param details Additional details
      */
-    void LogMethodCall(const std::string& method, const std::string& details = "");
+    void LogMethodCall(const std::string& method, const std::string& details = "") const;
 };
 
 } // namespace ns3
