@@ -5,6 +5,25 @@ if(${GSL_FOUND})
   )
 endif()
 
+set(mpi_sources)
+set(mpi_headers)
+set(mpi_libraries)
+
+if(${ENABLE_MPI})
+  set(mpi_sources
+      mpi-channel/wifi-channel-mpi-processor.cc
+      mpi-channel/wifi-mpi-interface.cc
+  )
+  set(mpi_headers
+      mpi-channel/wifi-channel-mpi-processor.h
+      mpi-channel/wifi-mpi-interface.h
+  )
+  set(mpi_libraries
+      ${libmpi}
+      MPI::MPI_CXX
+  )
+endif()
+
 set(source_files
     helper/athstats-helper.cc
     helper/spectrum-wifi-helper.cc
@@ -177,8 +196,6 @@ set(source_files
     mpi-channel/yans-wifi-channel-proxy.cc
     mpi-channel/remote-yans-wifi-channel-stub.cc
     mpi-channel/remote-yans-wifi-phy-stub.cc
-    mpi-channel/wifi-mpi-message.cc
-    mpi-channel/wifi-mpi-interface.cc
 )
 
 set(header_files
@@ -363,19 +380,20 @@ set(header_files
     mpi-channel/yans-wifi-channel-proxy.h
     mpi-channel/remote-yans-wifi-channel-stub.h
     mpi-channel/remote-yans-wifi-phy-stub.h
-    mpi-channel/wifi-mpi-message.h
-    mpi-channel/wifi-mpi-interface.h
     test/wifi-mlo-test.h
 )
 
 build_lib(
   LIBNAME wifi
   SOURCE_FILES ${source_files}
+               ${mpi_sources}
   HEADER_FILES ${header_files}
+               ${mpi_headers}
   LIBRARIES_TO_LINK
     ${libenergy}
     ${libspectrum}
     ${gsl_libraries}
+    ${mpi_libraries}
   TEST_SOURCES
     test/block-ack-test-suite.cc
     test/channel-access-manager-test.cc
