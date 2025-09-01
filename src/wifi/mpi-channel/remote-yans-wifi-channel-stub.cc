@@ -66,6 +66,34 @@ RemoteYansWifiChannelStub::~RemoteYansWifiChannelStub()
     LogMethodCall("Destructor", "Destroying RemoteYansWifiChannelStub");
 }
 
+bool
+RemoteYansWifiChannelStub::InitializeMpi()
+{
+    NS_LOG_FUNCTION(this);
+    
+#ifdef NS3_MPI
+    if (WifiMpi::IsEnabled())
+    {
+        m_mpiInitialized = true;
+        m_loggingFallback = false;
+        LogMethodCall("InitializeMpi", "MPI successfully initialized for WiFi channel stub");
+        return true;
+    }
+    else
+    {
+        m_mpiInitialized = false;
+        m_loggingFallback = true;
+        LogMethodCall("InitializeMpi", "MPI not enabled - using logging fallback");
+        return false;
+    }
+#else
+    m_mpiInitialized = false;
+    m_loggingFallback = true;
+    LogMethodCall("InitializeMpi", "Built without MPI support - using logging fallback");
+    return false;
+#endif
+}
+
 void
 RemoteYansWifiChannelStub::Add(Ptr<YansWifiPhy> phy)
 {
