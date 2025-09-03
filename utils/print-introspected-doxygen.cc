@@ -313,7 +313,8 @@ class StaticInformation
      */
     mutable std::vector<std::string> m_noTids;
 
-}; // class StaticInformation
+    // end of class StaticInformation
+};
 
 void
 StaticInformation::RecordAggregationInfo(std::string a, std::string b)
@@ -881,8 +882,7 @@ PrintAttributes(std::ostream& os, const TypeId tid)
             PrintAttributesTid(os, tmp);
         }
         tmp = tmp.GetParent();
-
-    } // Attributes
+    }
 } // PrintAttributes()
 
 /**
@@ -1034,8 +1034,7 @@ PrintTypeIdBlocks(std::ostream& os)
         // Get the class's index out of the map;
         TypeId tid = TypeId::GetRegistered(item.second);
         PrintTypeIdBlock(os, tid);
-    } // for class documentation
-
+    }
 } // PrintTypeIdBlocks()
 
 /***************************************************************

@@ -395,12 +395,10 @@ class ChannelAccessManagerTest : public TestCase
      * @param at the event time
      * @param duration the duration
      * @param channelType the channel type
-     * @param per20MhzDurations vector that indicates for how long each 20 MHz subchannel is busy
      */
     void AddCcaBusyEvt(uint64_t at,
                        uint64_t duration,
-                       WifiChannelListType channelType = WIFI_CHANLIST_PRIMARY,
-                       const std::vector<Time>& per20MhzDurations = {});
+                       WifiChannelListType channelType = WIFI_CHANLIST_PRIMARY);
     /**
      * Add switching event function
      * @param at the event time
@@ -413,6 +411,25 @@ class ChannelAccessManagerTest : public TestCase
      * @param duration the duration
      */
     void AddRxStartEvt(uint64_t at, uint64_t duration);
+
+    /**
+     * Add a PHY disconnect event consisting in the PHY leaving the link and returning after a
+     * given time.
+     *
+     * @param at the event time
+     * @param duration the duration of the interval during which no PHY is connected
+     * @param threshold the value for the ResetBackoffThreshold attribute
+     * @param from the index of the Txop that has to request channel access when PHY is reconnected
+     */
+    void AddPhyDisconnectEvt(uint64_t at, uint64_t duration, uint64_t threshold, uint32_t from);
+
+    /**
+     * Add a PHY reconnect event consisting in another PHY operating on the link for the given time.
+     *
+     * @param at the event time
+     * @param duration the duration of the interval during which another PHY is connected
+     */
+    void AddPhyReconnectEvt(uint64_t at, uint64_t duration);
 
     typedef std::vector<Ptr<TxopTest<TxopType>>> TxopTests; //!< the TXOP tests typedef
 
@@ -631,8 +648,8 @@ ChannelAccessManagerTest<TxopType>::StartTest(uint64_t slotTime,
     m_phy = CreateObject<SpectrumWifiPhy>();
     m_phy->SetInterferenceHelper(CreateObject<InterferenceHelper>());
     m_phy->AddChannel(CreateObject<MultiModelSpectrumChannel>());
-    m_phy->SetOperatingChannel(WifiPhy::ChannelTuple{0, chWidth, WIFI_PHY_BAND_UNSPECIFIED, 0});
-    m_phy->ConfigureStandard(WIFI_STANDARD_80211ac); // required to use 160 MHz channels
+    m_phy->SetOperatingChannel(WifiPhy::ChannelTuple{0, chWidth, WIFI_PHY_BAND_6GHZ, 0});
+    m_phy->ConfigureStandard(WIFI_STANDARD_80211be); // required to use 320 MHz channels
     m_ChannelAccessManager->SetupPhyListener(m_phy);
 }
 
@@ -658,6 +675,12 @@ ChannelAccessManagerTest<TxopType>::EndTest()
 {
     Simulator::Run();
 
+    m_ChannelAccessManager->RemovePhyListener(m_phy);
+    m_phy->Dispose();
+    m_ChannelAccessManager->Dispose();
+    m_ChannelAccessManager = nullptr;
+    m_feManager = nullptr;
+
     for (auto i = m_txop.begin(); i != m_txop.end(); i++)
     {
         Ptr<TxopTest<TxopType>> state = *i;
@@ -671,11 +694,6 @@ ChannelAccessManagerTest<TxopType>::EndTest()
     }
     m_txop.clear();
 
-    m_ChannelAccessManager->RemovePhyListener(m_phy);
-    m_phy->Dispose();
-    m_ChannelAccessManager->Dispose();
-    m_ChannelAccessManager = nullptr;
-    m_feManager = nullptr;
     Simulator::Destroy();
 }
 
@@ -712,7 +730,21 @@ ChannelAccessManagerTest<TxopType>::AddRxErrorEvt(uint64_t at, uint64_t duration
                         MicroSeconds(duration));
     Simulator::Schedule(MicroSeconds(at + duration) - Now(),
                         &ChannelAccessManager::NotifyRxEndErrorNow,
-                        m_ChannelAccessManager);
+                        m_ChannelAccessManager,
+                        WifiTxVector(OfdmPhy::GetOfdmRate6Mbps(),
+                                     1,
+                                     WIFI_PREAMBLE_LONG,
+                                     NanoSeconds(800),
+                                     1,
+                                     1,
+                                     0,
+                                     MHz_u{20},
+                                     false,
+                                     false,
+                                     false,
+                                     0,
+                                     0,
+                                     false));
 }
 
 template <typename TxopType>
@@ -727,7 +759,21 @@ ChannelAccessManagerTest<TxopType>::AddRxErrorEvt(uint64_t at,
                         MicroSeconds(duration));
     Simulator::Schedule(MicroSeconds(at + timeUntilError) - Now(),
                         &ChannelAccessManager::NotifyRxEndErrorNow,
-                        m_ChannelAccessManager);
+                        m_ChannelAccessManager,
+                        WifiTxVector(OfdmPhy::GetOfdmRate6Mbps(),
+                                     1,
+                                     WIFI_PREAMBLE_LONG,
+                                     NanoSeconds(800),
+                                     1,
+                                     1,
+                                     0,
+                                     MHz_u{20},
+                                     false,
+                                     false,
+                                     false,
+                                     0,
+                                     0,
+                                     false));
     Simulator::Schedule(MicroSeconds(at + timeUntilError) - Now(),
                         &ChannelAccessManager::NotifyCcaBusyStartNow,
                         m_ChannelAccessManager,
@@ -827,9 +873,10 @@ template <typename TxopType>
 void
 ChannelAccessManagerTest<TxopType>::AddCcaBusyEvt(uint64_t at,
                                                   uint64_t duration,
-                                                  WifiChannelListType channelType,
-                                                  const std::vector<Time>& per20MhzDurations)
+                                                  WifiChannelListType channelType)
 {
+    const auto chWidth = m_phy->GetChannelWidth();
+    std::vector<Time> per20MhzDurations(chWidth == 20 ? 0 : chWidth / 20, Seconds(0));
     Simulator::Schedule(MicroSeconds(at) - Now(),
                         &ChannelAccessManager::NotifyCcaBusyStartNow,
                         m_ChannelAccessManager,
@@ -857,6 +904,60 @@ ChannelAccessManagerTest<TxopType>::AddRxStartEvt(uint64_t at, uint64_t duration
                         &ChannelAccessManager::NotifyRxStartNow,
                         m_ChannelAccessManager,
                         MicroSeconds(duration));
+}
+
+template <typename TxopType>
+void
+ChannelAccessManagerTest<TxopType>::AddPhyDisconnectEvt(uint64_t at,
+                                                        uint64_t duration,
+                                                        uint64_t threshold,
+                                                        uint32_t from)
+{
+    m_ChannelAccessManager->SetAttribute("ResetBackoffThreshold",
+                                         TimeValue(MicroSeconds(threshold)));
+
+    Simulator::Schedule(MicroSeconds(at) - Now(),
+                        &ChannelAccessManager::RemovePhyListener,
+                        m_ChannelAccessManager,
+                        m_phy);
+
+    Simulator::Schedule(MicroSeconds(at + duration) - Now(), [=, this]() {
+        auto txop = m_txop[from];
+        auto hadFramesToTransmit = txop->HasFramesToTransmit(SINGLE_LINK_OP_ID);
+        m_ChannelAccessManager->SetupPhyListener(m_phy);
+        if (duration > threshold)
+        {
+            // request channel access again because all backoffs have been reset
+            if (m_ChannelAccessManager->NeedBackoffUponAccess(txop, hadFramesToTransmit, true))
+            {
+                txop->GenerateBackoff(0);
+            }
+            m_ChannelAccessManager->RequestAccess(txop);
+        }
+    });
+}
+
+template <typename TxopType>
+void
+ChannelAccessManagerTest<TxopType>::AddPhyReconnectEvt(uint64_t at, uint64_t duration)
+{
+    Simulator::Schedule(MicroSeconds(at) - Now(), [=, this]() {
+        auto newPhy = CreateObject<SpectrumWifiPhy>();
+        newPhy->SetInterferenceHelper(CreateObject<InterferenceHelper>());
+        newPhy->AddChannel(DynamicCast<SpectrumChannel>(m_phy->GetChannel()));
+        newPhy->SetOperatingChannel(m_phy->GetOperatingChannel());
+        newPhy->ConfigureStandard(WIFI_STANDARD_80211be);
+        // connect new PHY
+        m_ChannelAccessManager->SetupPhyListener(newPhy);
+
+        Simulator::Schedule(MicroSeconds(duration), [=, this]() {
+            // disconnect new PHY
+            m_ChannelAccessManager->RemovePhyListener(newPhy);
+            // reconnect previous PHY
+            m_ChannelAccessManager->SetupPhyListener(m_phy);
+            newPhy->Dispose();
+        });
+    });
 }
 
 /*
@@ -1296,6 +1397,66 @@ ChannelAccessManagerTest<QosTxop>::DoRun()
     AddAccessRequest(82, 20, 84, 0);
     EndTest();
 
+    // Check alignment at slot boundary after failed reception (backoff = 0).
+    // Also, check that CCA BUSY on a secondary channel does not affect channel access:
+    //  20         50     56           66             76     96
+    //              |             cca_busy             |
+    //   |          | <------eifs------>|              |      |
+    //   |    rx    | sifs | acktxttime | sifs + aifsn |  tx  |
+    //                   |
+    //                  55 request access
+    StartTest(4, 6, 10, 20, MHz_u{320});
+    AddTxop(1);
+    AddRxErrorEvt(20, 30);
+    AddCcaBusyEvt(50, 26, WIFI_CHANLIST_SECONDARY);
+    AddAccessRequest(55, 20, 76, 0);
+    EndTest();
+
+    // Check alignment at slot boundary after failed reception (backoff = 0).
+    // Also, check that CCA BUSY on a secondary channel does not affect channel access:
+    //  20         50     56           66             76     96
+    //              |             cca_busy             |
+    //   |          | <------eifs------>|              |      |
+    //   |    rx    | sifs | acktxttime | sifs + aifsn |  tx  |
+    //                                        |
+    //                                       70 request access
+    StartTest(4, 6, 10, 20, MHz_u{320});
+    AddTxop(1);
+    AddRxErrorEvt(20, 30);
+    AddCcaBusyEvt(50, 26, WIFI_CHANLIST_SECONDARY40);
+    AddAccessRequest(70, 20, 76, 0);
+    EndTest();
+
+    // Check alignment at slot boundary after failed reception (backoff = 0).
+    // Also, check that CCA BUSY on a secondary channel does not affect channel access:
+    //  20         50     56           66             76     84
+    //              |             cca_busy                    |
+    //   |          | <------eifs------>|              |      |
+    //   |    rx    | sifs | acktxttime | sifs + aifsn | idle |  tx  |
+    //                                                     |
+    //                                                    82 request access
+    StartTest(4, 6, 10, 20, MHz_u{320});
+    AddTxop(1);
+    AddRxErrorEvt(20, 30);
+    AddCcaBusyEvt(50, 34, WIFI_CHANLIST_SECONDARY80);
+    AddAccessRequest(82, 20, 84, 0);
+    EndTest();
+
+    // Check alignment at slot boundary after failed reception (backoff = 0).
+    // Also, check that CCA BUSY on a secondary channel does not affect channel access:
+    //  20         50     56           66             76     84
+    //              |             cca_busy                    |
+    //   |          | <------eifs------>|              |      |
+    //   |    rx    | sifs | acktxttime | sifs + aifsn | idle |  tx  |
+    //                                                     |
+    //                                                    82 request access
+    StartTest(4, 6, 10, 20, MHz_u{320});
+    AddTxop(1);
+    AddRxErrorEvt(20, 30);
+    AddCcaBusyEvt(50, 34, WIFI_CHANLIST_SECONDARY160);
+    AddAccessRequest(82, 20, 84, 0);
+    EndTest();
+
     // Check backoff decrement at slot boundaries. Medium idle during backoff
     //  20           50     56      60         64         68         72         76     96
     //   |     rx     | sifs | aifsn |   idle   |   idle   |   idle   |   idle   |  tx  |
@@ -1310,13 +1471,11 @@ ChannelAccessManagerTest<QosTxop>::DoRun()
     EndTest();
 
     // Check backoff decrement at slot boundaries. Medium becomes busy during backoff
-    //  20           50     56      60     61     71     77      81         85     87     97    103
-    //  107    127
-    //   |     rx     | sifs | aifsn | idle |  rx  | sifs | aifsn |   idle   | idle |  rx  | sifs |
-    //   aifsn |  tx  |
-    //      |                        |                            |          |
-    //     30 request access.    decrement                    decrement  decrement
-    //        backoff slots: 3    slots: 2                     slots: 1   slots: 0
+    //  20     50     56      60     61   71     77      81     85     87     97    103     107  127
+    //   |  rx  | sifs | aifsn | idle | rx | sifs | aifsn | idle | idle |  rx  | sifs | aifsn | tx |
+    //      |                  |                          |      |
+    //   30 request access.  decrement                decrement  decrement
+    //    backoff slots: 3    slots: 2                 slots: 1   slots: 0
     StartTest(4, 6, 10);
     AddTxop(1);
     AddRxOkEvt(20, 30);
@@ -1324,6 +1483,49 @@ ChannelAccessManagerTest<QosTxop>::DoRun()
     AddRxOkEvt(87, 10);
     AddAccessRequest(30, 20, 107, 0);
     ExpectBackoff(30, 3, 0);
+    EndTest();
+
+    // Check backoff reset after no PHY operates on a link for more than the threshold.
+    //  20     50     56      60     61       71     77      81    101
+    //   |  rx  | sifs | aifsn | idle | no phy | sifs | aifsn |  tx  |
+    //      |                  |               |
+    //   30 request access.  decrement       reset
+    //    backoff slots: 3    slots: 2       backoff
+    StartTest(4, 6, 10);
+    AddTxop(1);
+    AddRxOkEvt(20, 30);
+    AddAccessRequest(30, 20, 81, 0);
+    ExpectBackoff(30, 3, 0);
+    AddPhyDisconnectEvt(61, 10, 0, 0);
+    EndTest();
+
+    // Check backoff freeze while no PHY operates on a link for less than the threshold.
+    //  20     50     56      60     61       71     77      81     85     89    109
+    //   |  rx  | sifs | aifsn | idle | no phy | sifs | aifsn | idle | idle |  tx  |
+    //      |                  |               |              |      |
+    //   30 request access.  decrement       resume      decrement  decrement
+    //    backoff slots: 3    slots: 2       backoff      slots: 1   slots: 0
+    StartTest(4, 6, 10);
+    AddTxop(1);
+    AddRxOkEvt(20, 30);
+    AddAccessRequest(30, 20, 89, 0);
+    ExpectBackoff(30, 3, 0);
+    AddPhyDisconnectEvt(61, 10, 20, 0);
+    EndTest();
+
+    // Check backoff left unmodified when previous PHY is reconnected to the link
+    //  20         50     56      60 61    64       68   71  72       76   96
+    //   |          |      |       |  |----- new PHY -----|   |        |    |
+    //   |    rx    | sifs | aifsn |  idle  |  idle  |  idle  |  idle  | tx |
+    //      |                      |        |        |        |
+    //   30 request access. decrement  decrement  decrement  decrement
+    //    backoff slots: 4   slots: 3   slots: 2   slots: 1   slots: 0
+    StartTest(4, 6, 10);
+    AddTxop(1);
+    AddRxOkEvt(20, 30);
+    AddAccessRequest(30, 20, 76, 0);
+    ExpectBackoff(30, 4, 0);
+    AddPhyReconnectEvt(61, 10);
     EndTest();
 }
 
@@ -1496,7 +1698,7 @@ LargestIdlePrimaryChannelTest::DoRun()
     uint8_t channel = 0;
     std::list<WifiChannelListType> busyChannels;
 
-    for (auto chWidth : {MHz_u{20}, MHz_u{40}, MHz_u{80}, MHz_u{160}})
+    for (auto chWidth : {MHz_u{20}, MHz_u{40}, MHz_u{80}, MHz_u{160}, MHz_u{320}})
     {
         busyChannels.push_back(static_cast<WifiChannelListType>(channel));
 
@@ -1514,8 +1716,8 @@ LargestIdlePrimaryChannelTest::DoRun()
                 m_phy->SetInterferenceHelper(CreateObject<InterferenceHelper>());
                 m_phy->AddChannel(CreateObject<MultiModelSpectrumChannel>());
                 m_phy->SetOperatingChannel(
-                    WifiPhy::ChannelTuple{0, chWidth, WIFI_PHY_BAND_5GHZ, 0});
-                m_phy->ConfigureStandard(WIFI_STANDARD_80211ax);
+                    WifiPhy::ChannelTuple{0, chWidth, WIFI_PHY_BAND_6GHZ, 0});
+                m_phy->ConfigureStandard(WIFI_STANDARD_80211be);
                 // call SetupPhyListener to initialize the ChannelAccessManager
                 // last busy structs
                 m_cam->SetupPhyListener(m_phy);

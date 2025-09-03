@@ -12,16 +12,69 @@ Note that users who upgrade the simulator across versions, or who work directly 
 
 This file is a best-effort approach to solving this issue; we will do our best but can guarantee that there will be things that fall through the cracks, unfortunately. If you, as a user, can suggest improvements to this file based on your experience, please contribute a patch or drop us a note on ns-developers mailing list.
 
-## Changes from ns-3.43 to ns-3-dev
+## Changes from ns-3.45 to ns-3-dev
 
 ### New API
 
+* (wifi) Added a new `EarlyTxopEndDetect` attribute to `EhtFrameExchangeManager` to control whether the Duration/ID value of the frame being transmitted or received by a device shall be used to early detect the end of an ongoing TXOP (held by another device).
+
+### Changes to existing API
+
+* (antenna) Reformatted documentation.
+* (internet) Added check for longest prefix match in GlobalRouting.
+* (lr-wpan) Debloat MAC PD-DATA.indication and reduce packet copies.
+* (zigbee) Added group table.
+* (zigbee) Added Groupcast (Multicast) support.
+
+### Changes to build system
+
+### Changed behavior
+
+* (internet) The Ipv[4,6]RawSocket now reflects the Linux implementation, meaning that fragmented packets are reassembled (fragments are not anymore received by the socket), and packets that are simply forwarded are not received by the socket either (fixes #809).
+
+## Changes from ns-3.44 to ns-3.45
+
+### New API
+
+* (network) Added a function to detect IPv4 APIPA addresses (169.254.0.0/16).
+* (wifi) Added a new `AssocType` attribute to `StaWifiMac` to configure the type of association performed by a device, provided that it is supported by the standard configured for the device. By using this attribute, it is possible for an EHT single-link device to perform ML setup with an AP MLD and for an EHT multi-link device to perform legacy association with an AP MLD.
+* (wifi) Added a new attribute `Per20CcaSensitivityThreshold` to `EhtConfiguration` for tuning the Per 20MHz CCA threshold when 802.11be is used.
+* (wifi) Added a new `MaxRadioBw` attribute to `WifiPhy` to configure the maximum width supported by the radio.
+* (wifi) Added a new attribute (`KeepMainPhyAfterDlTxop`) to the `AdvancedEmlsrManager` to control whether, after the end of a DL TXOP carried out on an aux PHY link, the main PHY shall stay on that link (for a switch main PHY back delay) in the attempt to gain an UL TXOP. This attribute is applicable to the case in which aux PHYs are not TX capable and do not switch link.
+
+### Changes to existing API
+
+* (core) ``Object::GetInstanceTypeId()`` can no longer be specialized by subclasses and any such subclass API should be deleted (the base class will handle it).
+* (dsr) Reformatted documentation and added a new concept figure.
+* (flow-monitor) Reformatted documentation and added a new concept figure.
+* (internet-apps) Added a parameter to the RADVD helper to announce a prefix without the autoconfiguration flag.
+* (internet-apps) Added `DhcpV6` application support.
+* (lr-wpan) - Renamed example ``lr-wpan\examples\lr-wpan-mlme.cc`` to ``lr-wpan\examples\lr-wpan-beacon-mode.cc``.
+* (lr-wpan) - Update correct use of extended addresses in ``lr-wpan\examples\lr-wpan-data.cc``.
+* (wifi) Callbacks connected to the `WifiMac::IcfDropReason` trace source are now passed a `struct IcfDropInfo` object that has three fields indicating the reason for dropping the ICF, the ID of the link on which the ICF was dropped and the MAC address of the sender of the ICF.
+* (wifi) Obsoleted the `Support40MHzOperation` and `Support160MHzOperation` attributes from the HT/VHT configurations. These capabilities are now directly derived from the `ChannelSettings` attribute.
+* (wifi) The `EmlsrSwitchMainPhyBackTrace` has been extended to provide the time elapsed since the switch main PHY back timer started, the reason why the main PHY switches back before the expiration of the switch main PHY back timer and whether the main PHY is switching while it is requested to switch back.
+
+### Changes to build system
+
+* The ns-allinone release has been redesigned; it no longer includes ``netanim`` or ``bake`` but instead includes ns-3 plus compatible contributed modules.
+
+### Changed behavior
+
+* (docs) Models documentation format guidelines have been updated.
+* (zigbee) Adjust pedantic link cost requirement in ``NeighborTable::LookUpForBestParent``, a minimum link cost of 3 is not required now.
+* (wifi) Normal Ack, BlockAck and BlockAckReq frames are transmitted, if appropriate, as non-HT duplicate PPDUs on a bandwidth matching that of the data frame transmitted in the same frame exchange sequence.
+
+## Changes from ns-3.43 to ns-3.44
+
+### New API
+
+* (antenna) Add `SymmetricAdjacencyMatrix` utility class, used to track the necessity of channel update between every `PhasedArrayModel` pair.
 * (applications) Added two new base classes for source and sink applications, `SourceApplication` and `SinkApplication`, respectively.
-* (wifi) Changes have been made to the `WifiRemoteStationManager` interface for what concerns the update of the frame retry count of the MPDUs and the decision of dropping MPDUs (possibly based on the max retry limit). The `NeedRetransmission` method has been replaced by the `GetMpdusToDropOnTxFailure` method and the `DoNeedRetransmission` method has been replaced by the `DoGetMpdusToDropOnTxFailure` method. Also, the `DoIncrementRetryCountOnTxFailure` method has been added to implement custom policies for the update of the frame retry count of MPDUs upon transmission failure.
 * (applications) Added an `OnOffState` trace source to `OnOffApplication`, to track whether the application is transmitting or not.
-* (zigbee) Added Zigbee module support. The module includes a NWK layer with joining and routing capabilities. No APS layer included.
-* (antenna) Add `SymmetricAdjacencyMatrix` utility class, used to track the necessity of channel state between every `PhasedArrayModel` pair.
 * (wifi) Added a new **RobustAVStreamingSupported** attribute to `WifiMac` to enable 802.11aa features (GCR).
+* (wifi) Changes have been made to the `WifiRemoteStationManager` interface for what concerns the update of the frame retry count of the MPDUs and the decision of dropping MPDUs (possibly based on the max retry limit). The `NeedRetransmission` method has been replaced by the `GetMpdusToDropOnTxFailure` method and the `DoNeedRetransmission` method has been replaced by the `DoGetMpdusToDropOnTxFailure` method. Also, the `DoIncrementRetryCountOnTxFailure` method has been added to implement custom policies for the update of the frame retry count of MPDUs upon transmission failure.
+* (zigbee) Added Zigbee module support. The module includes a NWK layer with joining and routing capabilities. No APS layer included.
 
 ### Changes to existing API
 
@@ -38,9 +91,17 @@ This file is a best-effort approach to solving this issue; we will do our best b
 
 ### Changes to build system
 
+* !2319 Add support for clang-tidy-19
+* !2251 Add msbuild and Visual Studio generator support to the ns3 script
+* !2251 Use ccache with ClangCL/MSVC
+* !2251 Provide option to generate export header from build_lib
+* !2260 Scan for modules in the external contrib directory ../ns-3-external-contrib
+* !2255 Exclude external imported targets from missing libraries check
+* !2238 Prevent Python bindings from being enabled along with MPI
+
 ### Changed behavior
 
-* (lr-wpan) Association: Fix the handling of situations where the association response commands arrives before the data request command acknowledgment that is supposed to precede it.
+* (lr-wpan) !2334 Association: Fix the handling of situations where the association response commands arrives before the data request command acknowledgment that is supposed to precede it.
 
 ## Changes from ns-3.42 to ns-3.43
 

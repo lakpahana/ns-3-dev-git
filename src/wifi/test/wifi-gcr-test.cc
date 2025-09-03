@@ -744,9 +744,9 @@ GcrTestBase::DoSetup()
     // WifiHelper::EnableLogComponents();
     // LogComponentEnable("WifiGcrTest", LOG_LEVEL_ALL);
 
-    RngSeedManager::SetSeed(1);
-    RngSeedManager::SetRun(2);
-    int64_t streamNumber = 100;
+    RngSeedManager::SetSeed(m_rngSeed);
+    RngSeedManager::SetRun(m_rngRun);
+    int64_t streamNumber = m_streamNo;
 
     Config::SetDefault("ns3::WifiMacQueue::MaxDelay", TimeValue(m_params.maxLifetime));
     const auto maxPacketsInQueue = std::max<uint16_t>(m_params.numGroupcastPackets + 1, 500);
@@ -908,17 +908,12 @@ GcrTestBase::DoSetup()
         if (m_params.stas.at(i).standard >= WIFI_STANDARD_80211n)
         {
             auto staHtConfiguration = CreateObject<HtConfiguration>();
-            staHtConfiguration->m_40MHzSupported =
-                (m_params.stas.at(i).standard >= WIFI_STANDARD_80211ac ||
-                 m_params.stas.at(i).maxChannelWidth >= MHz_u{40});
             staHtConfiguration->m_sgiSupported = (m_params.stas.at(i).minGi == NanoSeconds(400));
             staNetDevice->SetHtConfiguration(staHtConfiguration);
         }
         if (m_params.stas.at(i).standard >= WIFI_STANDARD_80211ac)
         {
             auto staVhtConfiguration = CreateObject<VhtConfiguration>();
-            staVhtConfiguration->m_160MHzSupported =
-                (m_params.stas.at(i).maxChannelWidth >= MHz_u{160});
             staNetDevice->SetVhtConfiguration(staVhtConfiguration);
         }
         if (m_params.stas.at(i).standard >= WIFI_STANDARD_80211ax)
@@ -1046,6 +1041,7 @@ GcrUrTest::GcrUrTest(const std::string& testName,
       m_gcrUrParams{gcrUrParams},
       m_currentUid{0}
 {
+    m_rngRun = 2;
 }
 
 void
@@ -1373,6 +1369,7 @@ GcrBaTest::GcrBaTest(const std::string& testName,
       m_lastTxSeq{-1},
       m_nTxGcrBarsInCurrentTxop{0}
 {
+    m_rngRun = 5;
 }
 
 void

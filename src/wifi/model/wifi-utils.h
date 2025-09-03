@@ -10,10 +10,10 @@
 #define WIFI_UTILS_H
 
 #include "block-ack-type.h"
+#include "wifi-constants.h"
 #include "wifi-types.h"
 
 #include "ns3/fatal-error.h"
-#include "ns3/nstime.h"
 #include "ns3/ptr.h"
 
 #include <list>
@@ -27,6 +27,9 @@ class Mac48Address;
 class WifiMacHeader;
 class Packet;
 class WifiMac;
+class WifiTxVector;
+
+enum class TriggerFrameVariant : uint8_t;
 
 /**
  * Wifi direction. Values are those defined for the TID-to-Link Mapping Control Direction
@@ -179,10 +182,14 @@ uint32_t GetBlockAckRequestSize(BlockAckReqType type);
 /**
  * Return the total MU-BAR size (including FCS trailer).
  *
+ * @param variant the Common Info field variant of the MU-BAR
+ * @param bw the bandwidth over which the MU-BAR is transmitted
  * @param types the list of Block Ack Request types of the individual BARs
  * @return the total MU-BAR size in bytes
  */
-uint32_t GetMuBarSize(std::list<BlockAckReqType> types);
+uint32_t GetMuBarSize(TriggerFrameVariant variant,
+                      MHz_u bw,
+                      const std::list<BlockAckReqType>& types);
 /**
  * Return the total RTS size (including FCS trailer).
  *
@@ -195,6 +202,13 @@ uint32_t GetRtsSize();
  * @return the total CTS size in bytes
  */
 uint32_t GetCtsSize();
+
+/**
+ * @param txVector the TXVECTOR used to transmit a frame whose reception failed
+ * @return the estimated Ack TX time, based on Table 10-8 of IEEE 802.11REVme D7.0
+ */
+Time GetEstimatedAckTxTime(const WifiTxVector& txVector);
+
 /**
  * @param seq MPDU sequence number
  * @param winstart sequence number window start
@@ -261,12 +275,6 @@ bool IsGcr(Ptr<WifiMac> mac, const WifiMacHeader& hdr);
  */
 Mac48Address GetIndividuallyAddressedRecipient(Ptr<WifiMac> mac, const WifiMacHeader& hdr);
 
-/// Size of the space of sequence numbers
-static constexpr uint16_t SEQNO_SPACE_SIZE = 4096;
-
-/// Size of the half the space of sequence numbers (used to determine old packets)
-static constexpr uint16_t SEQNO_SPACE_HALF_SIZE = SEQNO_SPACE_SIZE / 2;
-
 /// Link ID for single link operations (helps tracking places where correct link
 /// ID is to be used to support multi-link operations)
 static constexpr uint8_t SINGLE_LINK_OP_ID = 0;
@@ -276,13 +284,6 @@ static constexpr uint8_t WIFI_LINKID_UNDEFINED = 0xff;
 
 /// Invalid TID identifier
 static constexpr uint8_t WIFI_TID_UNDEFINED = 0xff;
-
-/// Wi-Fi Time Unit value in microseconds (see IEEE 802.11-2020 sec. 3.1)
-/// Used to initialize WIFI_TU
-constexpr int WIFI_TU_US = 1024;
-
-/// Wi-Fi Time Unit (see IEEE 802.11-2020 sec. 3.1)
-extern const Time WIFI_TU;
 
 } // namespace ns3
 

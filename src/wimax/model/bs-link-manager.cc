@@ -21,7 +21,7 @@
 #include "ns3/packet.h"
 #include "ns3/simulator.h"
 
-#include <stdint.h>
+#include <cstdint>
 
 namespace ns3
 {
@@ -248,7 +248,8 @@ BSLinkManager::VerifyInvitedRanging(Cid cid, uint8_t uiuc)
             {
                 auto rngrsp = new RngRsp();
                 AbortRanging(ssRecord->GetBasicCid(), rngrsp, ssRecord, true);
-            } // else keep polling
+            }
+            // else keep polling
         }
     }
 }

@@ -43,6 +43,8 @@ previous versions.
 The following list contains the set of clang-format versions that are verified
 to produce consistent output among themselves.
 
+* clang-format-19
+* clang-format-18
 * clang-format-17
 * clang-format-16
 * clang-format-15
@@ -1064,6 +1066,60 @@ the preceding lines.
   /// Node container with the Wi-Fi stations
   NodeContainer wifiStations(3);
 
+Comments in closing braces are generally discouraged, to allow for consistent style
+formatting across recent versions of clang-format (see MRs
+`!1899 <https://gitlab.com/nsnam/ns-3-dev/-/merge_requests/1899>`_ and
+`!2070 <https://gitlab.com/nsnam/ns-3-dev/-/merge_requests/2070>`_).
+This rule may be overridden in cases where the comment improves the code's readability.
+For example, in class declarations in files with multiple classes, classes within parent classes,
+and inline class functions.
+To ensure consistent style formatting, prefer placing the comment marking the end of the class
+in a new line before the brace.
+
+An exception to this rule are the comments in the closing brace of a namespace,
+which identifies the corresponding namespace.
+
+The following examples illustrate the above guidelines.
+
+.. sourcecode:: cpp
+
+  // File with only one class
+
+  namespace ns3
+  {
+
+  int
+  MyClass::Func(int x)
+  {
+      while (...)
+      {
+          if (...)
+          {
+          } // end if // Do not add this comment
+      } // end while  // Do not add this comment
+  } // end Func       // Do not add this comment
+
+  } // namespace ns3  // Keep this comment
+
+.. sourcecode:: cpp
+
+  // Example of file with multiple classes, and classes within classes
+
+  class MyClass
+  {
+      class InlineClass
+      {
+          ...
+          int var; //!< Some variable
+
+          // end of class InlineClass  // This comment is allowed
+      };
+
+      ...
+
+      // end of class MyClass  // This comment is allowed
+  };
+
 Casts
 =====
 
@@ -1455,6 +1511,16 @@ for more details.
   brings demonstrable and significant performance improvement).
 
 - Avoid declaring trivial destructors, to optimize performance.
+
+.. _When an empty destructor is required: https://andreasfertig.com/blog/2023/12/when-an-empty-destructor-is-required/
+
+- When declaring default destructors with ``~Class() = default;``, be aware
+  that classes derived from ``SimpleRefCount<T>`` must have this declaration
+  on the source file (``.cc``). The header file (``.h``) should contain
+  the plain destructor declaration ``~Class();``. This is due to PIMPL's
+  opaque pointer, as explained in Andrea Fertig's blog post
+  `When an empty destructor is required`_.
+  See class WifiPpdu's destructor for an example.
 
 C++ standard
 ============

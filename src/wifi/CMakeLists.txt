@@ -63,6 +63,7 @@ set(source_files
     model/eht/tid-to-link-mapping-element.cc
     model/eht/eht-phy.cc
     model/eht/eht-ppdu.cc
+    model/eht/eht-ru.cc
     model/eht/emlsr-manager.cc
     model/eht/multi-link-element.cc
     model/error-rate-model.cc
@@ -155,6 +156,7 @@ set(source_files
     model/wifi-acknowledgment.cc
     model/wifi-assoc-manager.cc
     model/wifi-bandwidth-filter.cc
+    model/wifi-constants.cc
     model/wifi-default-ack-manager.cc
     model/wifi-default-assoc-manager.cc
     model/wifi-default-gcr-manager.cc
@@ -181,6 +183,7 @@ set(source_files
     model/wifi-radio-energy-model.cc
     model/wifi-remote-station-info.cc
     model/wifi-remote-station-manager.cc
+    model/wifi-ru.cc
     model/wifi-spectrum-phy-interface.cc
     model/wifi-spectrum-signal-parameters.cc
     model/wifi-standards.cc
@@ -236,6 +239,7 @@ set(header_files
     model/eht/tid-to-link-mapping-element.h
     model/eht/eht-phy.h
     model/eht/eht-ppdu.h
+    model/eht/eht-ru.h
     model/eht/emlsr-manager.h
     model/eht/multi-link-element.h
     model/error-rate-model.h
@@ -328,6 +332,7 @@ set(header_files
     model/wifi-acknowledgment.h
     model/wifi-assoc-manager.h
     model/wifi-bandwidth-filter.h
+    model/wifi-constants.h
     model/wifi-default-ack-manager.h
     model/wifi-default-assoc-manager.h
     model/wifi-default-gcr-manager.h
@@ -360,6 +365,7 @@ set(header_files
     model/wifi-radio-energy-model.h
     model/wifi-remote-station-info.h
     model/wifi-remote-station-manager.h
+    model/wifi-ru.h
     model/wifi-spectrum-phy-interface.h
     model/wifi-spectrum-signal-parameters.h
     model/wifi-standards.h
@@ -403,10 +409,14 @@ build_lib(
     test/spectrum-wifi-phy-test.cc
     test/tx-duration-test.cc
     test/wifi-aggregation-test.cc
+    test/wifi-channel-settings-test.cc
     test/wifi-co-trace-helper-test.cc
     test/wifi-dynamic-bw-op-test.cc
     test/wifi-eht-info-elems-test.cc
-    test/wifi-emlsr-test.cc
+    test/wifi-emlsr-basic-exchanges-test.cc
+    test/wifi-emlsr-enabling-test.cc
+    test/wifi-emlsr-link-switch-test.cc
+    test/wifi-emlsr-test-base.cc
     test/wifi-error-rate-models-test.cc
     test/wifi-fils-frame-test.cc
     test/wifi-gcr-test.cc
@@ -432,4 +442,5 @@ build_lib(
     test/wifi-phy-mu-mimo-test.cc
     test/wifi-operating-channel-test.cc
     test/wifi-tx-stats-helper-test.cc
+  GENERATE_EXPORT_HEADER
 )

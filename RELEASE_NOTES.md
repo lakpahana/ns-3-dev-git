@@ -19,6 +19,94 @@ and references prefixed by '!' refer to a
 This release is intended to work on systems with the following minimal
 requirements (Note: not all ns-3 features are available on all systems):
 
+- g++-11.1 or later, or LLVM/clang++-17 or later
+- Python 3.8 or later
+- CMake 3.20 or later
+- (macOS only) Xcode 13.1.6 or later
+- (Windows only) Msys2/MinGW64 and Msys2/UCRT64 toolchains or WSL2
+
+Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.html) and has only
+been tested on Linux. As of this release, the latest known version to work with ns-3 is cppyy==3.5.0.
+
+### New user-visible features
+
+ns-3 has switched to the C++23 standard by default.
+
+- (antenna) !2516 - Reformatted documentation
+- (core) A stacktrace will now be printed on fatal errors in supported platforms.
+- (wifi) !2524 - Fix corrupted radiotap header when EHT is used.
+- (zigbee) !2512 - Added Groupcast (Multicast) support
+
+### Bugs fixed
+
+- (internet) #1251 - Added check for longest prefix match in GlobalRouting
+- (wifi) Block transmission on other EMLSR links as soon as it is detected that the main PHY is receiving an A-MPDU, to prevent that the EMLSR client starts an UL TXOP before the end of the A-MPDU
+- (wifi) EMLSR clients can switch to listening operations when receiving the MAC header of a broadcast frame that is not a Trigger Frame nor a Multi-STA BA
+
+## Release 3.45
+
+This release is available from:
+<https://www.nsnam.org/release/ns-3.45.tar.bz2>
+
+### Supported platforms
+
+This release is intended to work on systems with the following minimal
+requirements (Note: not all ns-3 features are available on all systems):
+
+- g++-10.1 or later, or LLVM/clang++-11 or later
+- Python 3.8 or later
+- CMake 3.13 or later
+- (macOS only) Xcode 13.1.6 or later
+- (Windows only) Msys2/MinGW64 and Msys2/UCRT64 toolchains or WSL2
+
+Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.html) and has only
+been tested on Linux. As of this release, the latest known version to work with ns-3 is cppyy==3.5.0.
+
+The required Doxygen version for documentation generation is now version 1.13.
+
+Note that the ns-3 allinone archive has been redesigned for this release; the
+allinone release no longer contains the `netanim` animator or the `bake` build tools
+but instead contains ns-3 plus additional contributed ns-3 modules that are known
+to work with the release.
+
+### New user-visible features
+
+- (dsr) !2403 - Reformatted documentation and added a new concept figure.
+- (flow-monitor) !2387 - Reformatted documentation and added a new concept figure.
+- (internet-apps) !2084 - GSoC 2024 DHCPV6 application added.
+- (lr-wpan) - !2429 - Renamed example lr-wpan-mlme to lr-wpan-beacon-mode.
+- (lr-wpan) - !2429 - Documentation update and small reformat fixes.
+- (wifi) 320 MHz channel support was added to the 802.11be model
+- (wifi) Added the `ProtectSingleExchange` attribute to the `QosFrameExchangeManager` to choose whether the NAV protection should cover the entire TXOP or only the current frame exchange when the TXOP limit is non-zero. In that case, the Duration/ID field in frames establishing the protection is set to the time remaining until the end of the current frame exchange. It is also possible to select whether the NAV duration should be extended by an additional time to protect beyond end of the immediate frame exchange via the `SingleExchangeProtectionSurplus` attribute of the `QosFrameExchangeManager`.
+
+### Bugs fixed
+
+- (bindings) #1187 - Fix library filtering to skip non-ns-3 libraries with "ns3" in their names.
+- (flow-monitor) #1202 - Create XML file in text mode
+- (internet) !2486 - Fix #809 - Ping for v4,v6 works now if fragmentation occurs.
+- (mobility) !2397 - Fix Rectangle::GetClosestSideOrCorner. It could assign the incorrect side when the checked position was outside the rectangle.
+- (wifi) #2368 - Fix various issues related to Content Channels and RU allocation. Fixes mostly covers cases where OFDMA is used with central 26 tones, where a single user is being assigned the whole PPDU bandwidth or where a RU is larger than 20 MHz.
+- (wifi) Various fixes to the EMLSR model have been made
+- (wifi) Fix the time the `NSlotsLeftAlert` trace source of `ChannelAccessManager` is fired (it cannot be earlier than the access grant start time)
+- (wifi) Fix the EIFS computation, which depends on the modulation class of the PPDU whose reception failed rather than on the latest standard supported by a device
+- (wifi) #1158 - Reintroduce WifiPpdu's destructor due to PIMPL
+- (zigbee) !2383 - Fix malformed RREP command with missing command options field.
+
+## Release 3.44
+
+This release adds the zigbee module and otherwise contains maintenance and small feature updates
+to the existing models and build system.
+
+### Availability
+
+This release is available from:
+<https://www.nsnam.org/release/ns-allinone-3.44.tar.bz2>
+
+### Supported platforms
+
+This release is intended to work on systems with the following minimal
+requirements (Note: not all ns-3 features are available on all systems):
+
 - g++-10.1 or later, or LLVM/clang++-11 or later
 - Python 3.8 or later
 - CMake 3.13 or later
@@ -28,7 +116,11 @@ requirements (Note: not all ns-3 features are available on all systems):
 Python API requires [Cppyy](https://cppyy.readthedocs.io/en/latest/installation.html) and has only
 been tested on Linux. As of this release, the latest known version to work with ns-3 is cppyy==3.1.2.
 
-The required Doxygen version for documentation generation is version 1.11.
+The required Doxygen version for documentation generation is now version 1.11.
+
+Doxygen tags are now required to use the '@' rather than the '\' character.
+
+The minimum clang-format version is version 15.
 
 ### New user-visible features
 
@@ -36,33 +128,41 @@ The required Doxygen version for documentation generation is version 1.11.
 - (applications) - The `ThreeGppHttpServer::LocalAddress` and `ThreeGppHttpServer::LocalPort` attributes have been renamed to `ThreeGppHttpServer::Remote` and `ThreeGppHttpServer::Port`, respectively.
 - (applications) - It is now possible to specify the address on which to bind the listening socket for UdpServer via the `Local` attribute.
 - (applications) - It is now possible to specify a port only for PacketSink to listen to any address (both IPv4 and IPv6).
+- (build) Scan for contrib modules in `ns-3-external-contrib` directory, at the same level of the ns-3 directory (e.g. `./ns-3-dev/../ns-3-external-contrib/`).
+- (energy) Added new information and reformatted energy module documentation.
 - (wifi) - Added a `WifiDefaultProtectionManager::SkipMuRtsBeforeBsrp` attribute to avoid using MU-RTS to protect the transmission of a BSRP Trigger Frame. If this attribute is set to true (which is the default value), BSRP Trigger Frames can be used as Initial Control Frames for EMLSR clients
 - (wifi) Each MSDU, A-MSDU or management MPDU now has its individual frame retry count and each Txop/QosTxop has its own SRC (Station Retry Count) to match the standard specifications.
 - (wifi) The `MaxSsrc` and `MaxSlrc` attributes of the `WifiRemoteStationManager` have been obsoleted and replaced by the `FrameRetryLimit` attribute of the `WifiMac`.
 - (wifi) Added the `IncrementRetryCountUnderBa` attribute to the  `WifiRemoteStationManager` to choose whether or not to increase the retry count of frames that are part of a block ack agreement; this attribute defaults to false to match the standard specifications.
 - (wifi) Added a new `BaEstablished` trace source to `QosTxop` to notify that a block ack agreement has been established with a given recipient for a given TID.
-- (zigbee) Added Zigbee module support.
-- (energy) Added new information and reformatted energy module documentation.
 - (wifi) Added a new `MainPhySwitch` trace source to EmlsrManager, which is fired when the main PHY switches channel to operate on another link and provides information about the reason for starting the switch.
-- (build) Scan for contrib modules in `ns-3-external-contrib` directory, at the same level of the ns-3 directory (e.g. `./ns-3-dev/../ns-3-external-contrib/`).
 - (wifi) Add support for exchanging 802.11be Multi-Link Probe Request frames. Currently, the default association manager does not instruct the MAC to transmit a Multi-Link Probe Request frame, though.
 - (wifi) 2004! - Add Wi-Fi channel occupancy statistics helper
 - (wifi) 2009! - Added WifiTxStatsHelper for Wi-Fi MAC-level tracing.
 - (wifi) - Added support for 802.11aa groupcast with retries (GCR). Both unsolicited retries (GCR-UR) and Block Ack (GCR-BA) mechanisms are implemented.
+- (zigbee) Added a new Zigbee module.
+- (wifi) Trigger frames have been extended to support Special User Info field
+- (wifi) Added support for 802.11be STAs to operate on 320 MHz in 6 GHz band.
 
 ### Bugs fixed
 
+- (core) - Fix the command-line handling of default values containing a space
+- (examples) - Fix incorrect energy calculation in wifi power adaptation examples
+- (internet) #1109 - Add support for multiple hardware types in ArpHeader
+- (internet) #1177 - check for 0-TTL before trying to decrement
 - (lr-wpan) !2334 - Fix the MAC reaction to an association issue in which association response commands might be received before data request command acks.
 - (propagation) Scale the NTN LOS probabilities from percentages [0, 100] to probabilities [0, 1]
+- (propagation) !2352 - Fix Okumura Hata propagation loss model for open areas environment
 - (spectrum) Calculate PSD by combining received power on ports, even when no precoding matrix is set
 - (spectrum) Scale the CDS parameter of V2V models to nanoseconds
 - (spectrum) Add missing K-factor fields (uk, sigK) for NTN NLOS 3GPP channel model
+- (spectrum) Trigger 3GPP channel updates after changes to antenna attributes
 - (wifi) Retransmit procedures have been aligned with the standard specifications.
 - (wifi) Clear PSDU map if no immediate response expected with BAR-BA ack sequence
 - (wifi) Fix S-MPDU TX duration computation with BlockAck ack policy
 - (wifi) Fix missing DSSS Param Set in Probe Request sent over 2.4 GHz links
-- (spectrum) Trigger 3GPP channel updates after changes to antenna attributes
 - (wifi) #1104 - Fix wrong calculation of start sequence number
+- (wifi) Ensure AckedMpdu trace is fired before the MPDU is dequeued
 
 ## Release 3.43
 

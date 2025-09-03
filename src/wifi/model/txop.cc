@@ -65,16 +65,18 @@ Txop::GetTypeId()
                                           "AC_BEACON",
                                           AC_UNDEF,
                                           "AC_UNDEF"))
-            .AddAttribute("MinCw",
-                          "The minimum value of the contention window (just for the first link, "
-                          "in case of 11be multi-link devices).",
-                          TypeId::ATTR_GET | TypeId::ATTR_SET, // do not set at construction time
-                          UintegerValue(15),
-                          MakeUintegerAccessor((void(Txop::*)(uint32_t)) & Txop::SetMinCw,
-                                               (uint32_t(Txop::*)() const) & Txop::GetMinCw),
-                          MakeUintegerChecker<uint32_t>(),
-                          TypeId::SupportLevel::OBSOLETE,
-                          "Use MinCws attribute instead of MinCw")
+            // NS_DEPRECATED_3_42
+            .AddAttribute(
+                "MinCw",
+                "The minimum value of the contention window (just for the first link, "
+                "in case of 11be multi-link devices).",
+                TypeId::ATTR_GET | TypeId::ATTR_SET, // do not set at construction time
+                UintegerValue(15),
+                MakeUintegerAccessor(static_cast<void (Txop::*)(uint32_t)>(&Txop::SetMinCw),
+                                     static_cast<uint32_t (Txop::*)() const>(&Txop::GetMinCw)),
+                MakeUintegerChecker<uint32_t>(),
+                TypeId::SupportLevel::OBSOLETE,
+                "Use MinCws attribute instead of MinCw")
             .AddAttribute(
                 "MinCws",
                 "The minimum values of the contention window for all the links (sorted in "
@@ -85,16 +87,18 @@ Txop::GetTypeId()
                 AttributeContainerValue<UintegerValue>(),
                 MakeAttributeContainerAccessor<UintegerValue>(&Txop::SetMinCws, &Txop::GetMinCws),
                 MakeAttributeContainerChecker<UintegerValue>(MakeUintegerChecker<uint32_t>()))
-            .AddAttribute("MaxCw",
-                          "The maximum value of the contention window (just for the first link, "
-                          "in case of 11be multi-link devices).",
-                          TypeId::ATTR_GET | TypeId::ATTR_SET, // do not set at construction time
-                          UintegerValue(1023),
-                          MakeUintegerAccessor((void(Txop::*)(uint32_t)) & Txop::SetMaxCw,
-                                               (uint32_t(Txop::*)() const) & Txop::GetMaxCw),
-                          MakeUintegerChecker<uint32_t>(),
-                          TypeId::SupportLevel::OBSOLETE,
-                          "Use MaxCws attribute instead of MaxCw")
+            // NS_DEPRECATED_3_42
+            .AddAttribute(
+                "MaxCw",
+                "The maximum value of the contention window (just for the first link, "
+                "in case of 11be multi-link devices).",
+                TypeId::ATTR_GET | TypeId::ATTR_SET, // do not set at construction time
+                UintegerValue(1023),
+                MakeUintegerAccessor(static_cast<void (Txop::*)(uint32_t)>(&Txop::SetMaxCw),
+                                     static_cast<uint32_t (Txop::*)() const>(&Txop::GetMaxCw)),
+                MakeUintegerChecker<uint32_t>(),
+                TypeId::SupportLevel::OBSOLETE,
+                "Use MaxCws attribute instead of MaxCw")
             .AddAttribute(
                 "MaxCws",
                 "The maximum values of the contention window for all the links (sorted in "
@@ -105,14 +109,15 @@ Txop::GetTypeId()
                 AttributeContainerValue<UintegerValue>(),
                 MakeAttributeContainerAccessor<UintegerValue>(&Txop::SetMaxCws, &Txop::GetMaxCws),
                 MakeAttributeContainerChecker<UintegerValue>(MakeUintegerChecker<uint32_t>()))
+            // NS_DEPRECATED_3_42
             .AddAttribute(
                 "Aifsn",
                 "The AIFSN: the default value conforms to non-QOS (just for the first link, "
                 "in case of 11be multi-link devices).",
                 TypeId::ATTR_GET | TypeId::ATTR_SET, // do not set at construction time
                 UintegerValue(2),
-                MakeUintegerAccessor((void(Txop::*)(uint8_t)) & Txop::SetAifsn,
-                                     (uint8_t(Txop::*)() const) & Txop::GetAifsn),
+                MakeUintegerAccessor(static_cast<void (Txop::*)(uint8_t)>(&Txop::SetAifsn),
+                                     static_cast<uint8_t (Txop::*)() const>(&Txop::GetAifsn)),
                 MakeUintegerChecker<uint8_t>(),
                 TypeId::SupportLevel::OBSOLETE,
                 "Use Aifsns attribute instead of Aifsn")
@@ -126,16 +131,18 @@ Txop::GetTypeId()
                 AttributeContainerValue<UintegerValue>(),
                 MakeAttributeContainerAccessor<UintegerValue>(&Txop::SetAifsns, &Txop::GetAifsns),
                 MakeAttributeContainerChecker<UintegerValue>(MakeUintegerChecker<uint8_t>()))
-            .AddAttribute("TxopLimit",
-                          "The TXOP limit: the default value conforms to non-QoS "
-                          "(just for the first link, in case of 11be multi-link devices).",
-                          TypeId::ATTR_GET | TypeId::ATTR_SET, // do not set at construction time
-                          TimeValue(MilliSeconds(0)),
-                          MakeTimeAccessor((void(Txop::*)(Time)) & Txop::SetTxopLimit,
-                                           (Time(Txop::*)() const) & Txop::GetTxopLimit),
-                          MakeTimeChecker(),
-                          TypeId::SupportLevel::OBSOLETE,
-                          "Use TxopLimits attribute instead of TxopLimit")
+            // NS_DEPRECATED_3_42
+            .AddAttribute(
+                "TxopLimit",
+                "The TXOP limit: the default value conforms to non-QoS "
+                "(just for the first link, in case of 11be multi-link devices).",
+                TypeId::ATTR_GET | TypeId::ATTR_SET, // do not set at construction time
+                TimeValue(MilliSeconds(0)),
+                MakeTimeAccessor(static_cast<void (Txop::*)(Time)>(&Txop::SetTxopLimit),
+                                 static_cast<Time (Txop::*)() const>(&Txop::GetTxopLimit)),
+                MakeTimeChecker(),
+                TypeId::SupportLevel::OBSOLETE,
+                "Use TxopLimits attribute instead of TxopLimit")
             .AddAttribute(
                 "TxopLimits",
                 "The values of TXOP limit for all the links (sorted in increasing order "
@@ -803,10 +810,9 @@ Txop::NotifySleep(uint8_t linkId)
 }
 
 void
-Txop::NotifyOff()
+Txop::NotifyOff(uint8_t linkId)
 {
-    NS_LOG_FUNCTION(this);
-    m_queue->Flush();
+    NS_LOG_FUNCTION(this << linkId);
 }
 
 void
