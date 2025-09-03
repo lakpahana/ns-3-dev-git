@@ -319,7 +319,7 @@ WifiChannelMpiProcessor::SendReceptionNotification(const RemoteDeviceInfo& rxDev
 
         // Send MPI message to device rank
         Ptr<MpiReceiver> mpiReceiver =
-            rxDevice.rank == MpiInterface::GetSystemId() ? nullptr : Create<MpiReceiver>();
+            rxDevice.rank == MpiInterface::GetSystemId() ? nullptr : CreateObject<MpiReceiver>();
 
         if (mpiReceiver && rxDevice.rank != MpiInterface::GetSystemId())
         {
