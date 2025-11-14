@@ -71,6 +71,26 @@ class NullMessageMpiInterface : public ParallelCommunicationInterface, Object
     void SendPacket(Ptr<Packet> p, const Time& rxTime, uint32_t node, uint32_t dev) override;
     MPI_Comm GetCommunicator() override;
 
+    /**
+     * \brief Send a WiFi-specific message to another rank
+     * \param buffer Serialized message buffer
+     * \param bufferSize Size of the buffer
+     * \param destRank Destination MPI rank
+     */
+    static void SendWifiMessage(const uint8_t* buffer, uint32_t bufferSize, uint32_t destRank);
+
+    /**
+     * \brief Callback type for WiFi message reception
+     */
+    typedef Callback<void, const uint8_t*, uint32_t, uint32_t> WifiMessageCallback;
+
+    /**
+     * \brief Register a callback for WiFi message reception
+     * \param msgType Message type to register for
+     * \param callback Callback to invoke when message is received
+     */
+    static void RegisterWifiMessageCallback(uint8_t msgType, WifiMessageCallback callback);
+
   private:
     /*
      * The null message implementation is a collaboration of several
@@ -166,6 +186,17 @@ class NullMessageMpiInterface : public ParallelCommunicationInterface, Object
 
     /** Did we create the communicator?  Have to free it. */
     static bool g_freeCommunicator;
+
+    /** Map of WiFi message type to callback */
+    static std::map<uint8_t, WifiMessageCallback> g_wifiMessageCallbacks;
+
+    /**
+     * \brief Process received WiFi message
+     * \param buffer Message buffer
+     * \param size Buffer size
+     * \param sourceRank Source MPI rank
+     */
+    static void ProcessWifiMessage(const uint8_t* buffer, uint32_t size, uint32_t sourceRank);
 };
 
 } // namespace ns3

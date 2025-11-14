@@ -30,6 +30,7 @@
 #include "null-message-simulator-impl.h"
 #include "remote-channel-bundle-manager.h"
 #include "remote-channel-bundle.h"
+#include "wifi-mpi-messages.h"
 
 #include "ns3/log.h"
 #include "ns3/net-device.h"
@@ -135,6 +136,8 @@ MPI_Comm NullMessageMpiInterface::g_communicator = MPI_COMM_WORLD;
 bool NullMessageMpiInterface::g_freeCommunicator = false;
 MPI_Request* NullMessageMpiInterface::g_requests;
 char** NullMessageMpiInterface::g_pRxBuffers;
+std::map<uint8_t, NullMessageMpiInterface::WifiMessageCallback>
+    NullMessageMpiInterface::g_wifiMessageCallbacks;
 
 TypeId
 NullMessageMpiInterface::GetTypeId()
@@ -273,12 +276,17 @@ NullMessageMpiInterface::SendPacket(Ptr<Packet> p, const Time& rxTime, uint32_t 
     auto iter = g_pendingTx.rbegin(); // Points to the last element
 
     uint32_t serializedSize = p->GetSerializedSize();
-    uint32_t bufferSize = serializedSize + (2 * sizeof(uint64_t)) + (2 * sizeof(uint32_t));
+    // Add 1 byte for msgType at the beginning
+    uint32_t bufferSize = 1 + serializedSize + (2 * sizeof(uint64_t)) + (2 * sizeof(uint32_t));
     auto buffer = new uint8_t[bufferSize];
     iter->SetBuffer(buffer);
-    // Add the time, dest node and dest device
+
+    // Write msgType first (0 for legacy packet)
+    *buffer = MPI_MSG_LEGACY_PACKET;
+
+    // Add the time, dest node and dest device (offset by 1 byte)
     uint64_t t = rxTime.GetInteger();
-    auto pTime = reinterpret_cast<uint64_t*>(buffer);
+    auto pTime = reinterpret_cast<uint64_t*>(buffer + 1);
     *pTime++ = t;
 
     Time guarantee_update =
@@ -392,52 +400,66 @@ NullMessageMpiInterface::ReceiveMessages(bool blocking)
             int count;
             MPI_Get_count(&status, MPI_CHAR, &count);
 
-            // Get the meta data first
-            auto pTime = reinterpret_cast<uint64_t*>(g_pRxBuffers[index]);
-            uint64_t time = *pTime++;
-            uint64_t guaranteeUpdate = *pTime++;
+            // Read msgType from first byte
+            uint8_t msgType = static_cast<uint8_t>(g_pRxBuffers[index][0]);
 
-            auto pData = reinterpret_cast<uint32_t*>(pTime);
-            uint32_t node = *pData++;
-            uint32_t dev = *pData++;
-
-            Time rxTime(time);
-
-            // rxtime == 0 means this is a Null Message
-            if (rxTime > Time(0))
+            if (msgType == MPI_MSG_LEGACY_PACKET)
             {
-                count -= sizeof(time) + sizeof(guaranteeUpdate) + sizeof(node) + sizeof(dev);
+                // Existing packet handling code (offset by 1 byte)
+                auto pTime = reinterpret_cast<uint64_t*>(g_pRxBuffers[index] + 1);
+                uint64_t time = *pTime++;
+                uint64_t guaranteeUpdate = *pTime++;
 
-                Ptr<Packet> p = Create<Packet>(reinterpret_cast<uint8_t*>(pData), count, true);
+                auto pData = reinterpret_cast<uint32_t*>(pTime);
+                uint32_t node = *pData++;
+                uint32_t dev = *pData++;
 
-                // Find the correct node/device to schedule receive event
-                Ptr<Node> pNode = NodeList::GetNode(node);
-                Ptr<MpiReceiver> pMpiRec = nullptr;
-                uint32_t nDevices = pNode->GetNDevices();
-                for (uint32_t i = 0; i < nDevices; ++i)
+                Time rxTime(time);
+
+                // rxtime == 0 means this is a Null Message
+                if (rxTime > Time(0))
                 {
-                    Ptr<NetDevice> pThisDev = pNode->GetDevice(i);
-                    if (pThisDev->GetIfIndex() == dev)
+                    count -= 1 + sizeof(time) + sizeof(guaranteeUpdate) + sizeof(node) + sizeof(dev);
+
+                    Ptr<Packet> p = Create<Packet>(reinterpret_cast<uint8_t*>(pData), count, true);
+
+                    // Find the correct node/device to schedule receive event
+                    Ptr<Node> pNode = NodeList::GetNode(node);
+                    Ptr<MpiReceiver> pMpiRec = nullptr;
+                    uint32_t nDevices = pNode->GetNDevices();
+                    for (uint32_t i = 0; i < nDevices; ++i)
                     {
-                        pMpiRec = pThisDev->GetObject<MpiReceiver>();
-                        break;
+                        Ptr<NetDevice> pThisDev = pNode->GetDevice(i);
+                        if (pThisDev->GetIfIndex() == dev)
+                        {
+                            pMpiRec = pThisDev->GetObject<MpiReceiver>();
+                            break;
+                        }
                     }
+                    NS_ASSERT(pNode && pMpiRec);
+
+                    // Schedule the rx event
+                    Simulator::ScheduleWithContext(pNode->GetId(),
+                                                   rxTime - Simulator::Now(),
+                                                   &MpiReceiver::Receive,
+                                                   pMpiRec,
+                                                   p);
                 }
-                NS_ASSERT(pNode && pMpiRec);
 
-                // Schedule the rx event
-                Simulator::ScheduleWithContext(pNode->GetId(),
-                                               rxTime - Simulator::Now(),
-                                               &MpiReceiver::Receive,
-                                               pMpiRec,
-                                               p);
+                // Update guarantee time for both packet receives and Null Messages.
+                Ptr<RemoteChannelBundle> bundle =
+                    RemoteChannelBundleManager::Find(status.MPI_SOURCE);
+                NS_ASSERT(bundle);
+
+                bundle->SetGuaranteeTime(Time(guaranteeUpdate));
             }
-
-            // Update guarantee time for both packet receives and Null Messages.
-            Ptr<RemoteChannelBundle> bundle = RemoteChannelBundleManager::Find(status.MPI_SOURCE);
-            NS_ASSERT(bundle);
-
-            bundle->SetGuaranteeTime(Time(guaranteeUpdate));
+            else
+            {
+                // WiFi message - dispatch to registered callback
+                ProcessWifiMessage(reinterpret_cast<uint8_t*>(g_pRxBuffers[index]),
+                                   count,
+                                   status.MPI_SOURCE);
+            }
 
             // Re-queue the next read
             MPI_Irecv(g_pRxBuffers[index],
@@ -532,6 +554,73 @@ NullMessageMpiInterface::Disable()
     else
     {
         NS_FATAL_ERROR("Cannot disable MPI environment without Initializing it first");
+    }
+}
+
+void
+NullMessageMpiInterface::SendWifiMessage(const uint8_t* buffer,
+                                          uint32_t bufferSize,
+                                          uint32_t destRank)
+{
+    NS_LOG_FUNCTION_NOARGS();
+    NS_ASSERT(g_enabled);
+    NS_ASSERT(buffer != nullptr);
+    NS_ASSERT(bufferSize > 0);
+
+    NullMessageSentBuffer sendBuf;
+    g_pendingTx.push_back(sendBuf);
+    auto iter = g_pendingTx.rbegin();
+
+    // Allocate and copy buffer
+    auto sendBuffer = new uint8_t[bufferSize];
+    std::memcpy(sendBuffer, buffer, bufferSize);
+    iter->SetBuffer(sendBuffer);
+
+    MPI_Isend(reinterpret_cast<void*>(sendBuffer),
+              bufferSize,
+              MPI_CHAR,
+              destRank,
+              0,
+              g_communicator,
+              iter->GetRequest());
+
+    // Update guarantee time for destination rank
+    NullMessageSimulatorImpl::GetInstance()->RescheduleNullMessageEvent(destRank);
+}
+
+void
+NullMessageMpiInterface::RegisterWifiMessageCallback(uint8_t msgType,
+                                                      WifiMessageCallback callback)
+{
+    NS_LOG_FUNCTION_NOARGS();
+    g_wifiMessageCallbacks[msgType] = callback;
+}
+
+void
+NullMessageMpiInterface::ProcessWifiMessage(const uint8_t* buffer,
+                                             uint32_t size,
+                                             uint32_t sourceRank)
+{
+    NS_LOG_FUNCTION_NOARGS();
+
+    if (size < 1)
+    {
+        NS_LOG_WARN("Received WiFi message with invalid size: " << size);
+        return;
+    }
+
+    uint8_t msgType = buffer[0];
+
+    auto it = g_wifiMessageCallbacks.find(msgType);
+    if (it != g_wifiMessageCallbacks.end())
+    {
+        // Invoke the registered callback
+        it->second(buffer, size, sourceRank);
+    }
+    else
+    {
+        NS_LOG_WARN("No callback registered for WiFi message type: "
+                    << static_cast<uint32_t>(msgType));
     }
 }
 

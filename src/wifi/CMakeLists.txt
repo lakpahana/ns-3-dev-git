@@ -138,6 +138,7 @@ set(source_files
     model/wifi-phy-operating-channel.cc
     model/wifi-phy-state-helper.cc
     model/wifi-ppdu.cc
+    model/wifi-ppdu-serialization.cc
     model/wifi-protection-manager.cc
     model/wifi-protection.cc
     model/wifi-psdu.cc
@@ -296,6 +297,7 @@ set(header_files
     model/wifi-phy-state.h
     model/wifi-phy.h
     model/wifi-ppdu.h
+    model/wifi-ppdu-serialization.h
     model/wifi-protection-manager.h
     model/wifi-protection.h
     model/wifi-psdu.h
@@ -355,4 +357,5 @@ build_lib(
     test/wifi-phy-cca-test.cc
     test/wifi-non-ht-dup-test.cc
     test/wifi-phy-mu-mimo-test.cc
+    test/wifi-ppdu-serialization-test.cc
 )
