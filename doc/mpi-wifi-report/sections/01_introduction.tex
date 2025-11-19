@@ -1,0 +1,79 @@
+\section{Introduction}
+\label{sec:introduction}
+
+\subsection{Motivation}
+
+The proliferation of wireless devices in modern networks has created an urgent need for large-scale WiFi simulations to evaluate network protocols, capacity planning, and performance optimization strategies. Applications such as smart cities, vehicular networks (V2X), dense IoT deployments, and enterprise WiFi require simulating hundreds to thousands of concurrent wireless devices. However, traditional network simulators like NS-3~\cite{ns3} face significant scalability challenges when simulating large-scale WiFi networks on single machines.
+
+The fundamental bottleneck in WiFi simulation stems from the inherent complexity of wireless channel modeling. Unlike wired point-to-point links, WiFi operates as a broadcast medium where every transmission potentially affects all devices within communication range. This necessitates O(n²) propagation calculations for each transmission event in an n-node network. For instance, a simulation with 200 WiFi devices generating periodic safety beacons at 10 Hz results in 2,000 transmissions per second, each requiring propagation calculations to 199 potential receivers—yielding nearly 400,000 channel computations per second. This computational burden, combined with memory requirements for maintaining per-device state, limits practical single-machine simulations to approximately 100-200 nodes~\cite{nsnam-scalability}.
+
+Real-world deployment scenarios far exceed these limits:
+\begin{itemize}
+    \item \textbf{Vehicular Networks}: Highway scenarios with multiple lanes can easily contain 500+ vehicles within communication range, each broadcasting safety beacons and cooperative awareness messages.
+    \item \textbf{Smart Cities}: Urban WiFi deployments for IoT sensing and municipal services require modeling thousands of access points and client devices.
+    \item \textbf{Dense Events}: Stadiums, concert venues, and conferences can have 10,000+ concurrent WiFi users.
+    \item \textbf{Enterprise Networks}: Corporate campuses with dozens of access points and hundreds of clients require comprehensive performance analysis.
+\end{itemize}
+
+\subsection{Challenges in Distributed WiFi Simulation}
+
+Distributing WiFi simulations across multiple machines introduces several technical challenges that distinguish it from parallel simulation of other network types:
+
+\paragraph{Channel Centralization}
+WiFi's broadcast nature creates a fundamental tension with distributed computing. In wired networks, point-to-point links can be cleanly partitioned across machines with minimal inter-machine communication. However, WiFi's shared medium means that any transmission potentially affects all nearby devices, requiring global channel state visibility. Naive distribution approaches that replicate channel state across machines lead to consistency problems and communication overhead that negates performance benefits.
+
+\paragraph{Time Synchronization}
+Discrete event simulations require strict causality: events must be processed in temporal order. In distributed settings, ensuring that a packet transmission on machine A is processed before its reception on machine B requires sophisticated synchronization protocols. WiFi's rapid event rates (microsecond-scale MAC operations) make this particularly challenging compared to higher-layer protocols with millisecond-scale events.
+
+\paragraph{Observability and Debugging}
+A critical but often overlooked challenge is maintaining observability in distributed simulations. Researchers rely on packet capture (PCAP) files to analyze protocol behavior, validate implementations, and debug issues. However, standard PCAP mechanisms capture packets at local network interfaces—a capability lost when packets are transmitted via MPI messages between machines rather than through simulated network devices.
+
+\paragraph{API Compatibility}
+NS-3 has a mature WiFi implementation with extensive validation and a large body of existing simulation scripts. Any distributed approach must maintain API compatibility to leverage this ecosystem. Breaking compatibility would require rewriting thousands of lines of validated code and abandon years of community effort.
+
+\subsection{Contributions}
+
+This report presents a novel distributed MPI architecture for WiFi simulation in NS-3 that addresses these challenges through the following contributions:
+
+\begin{enumerate}
+    \item \textbf{Centralized Channel, Distributed Devices Architecture}: We propose a design where a dedicated MPI rank acts as a centralized WiFi channel processor, handling all propagation calculations, while device simulation is distributed across other ranks. This approach embraces WiFi's broadcast nature rather than fighting it, maintaining channel correctness while enabling device parallelism.
+    
+    \item \textbf{Stub-Proxy Pattern for Transparency}: We introduce \texttt{RemoteYansWifiChannelStub}, a transparent proxy that intercepts local WiFi PHY operations and translates them to MPI messages. This maintains complete NS-3 API compatibility, allowing existing simulation scripts to run on distributed infrastructure without modification.
+    
+    \item \textbf{Hybrid MPI + Local Monitoring}: We develop a dual-network approach where each device has both an MPI-based interface for performance testing and a local monitoring interface for PCAP capture. This solves the observability problem, enabling detailed protocol analysis even in distributed scenarios.
+    
+    \item \textbf{Comprehensive Test Scenarios}: We implement and validate multiple realistic scenarios:
+    \begin{itemize}
+        \item Home WiFi: 8 heterogeneous devices (Smart TV, laptops, IoT devices, security cameras) with diverse traffic patterns
+        \item V2X Vehicular: 200+ vehicles across 4-6 highway lanes with realistic mobility and communication patterns
+        \item Multi-machine verification framework with hostname/PID tracking
+    \end{itemize}
+    
+    \item \textbf{Production Implementation}: We provide a complete, tested implementation with build instructions, configuration examples, and troubleshooting guidance, ready for use by the research community.
+\end{enumerate}
+
+\subsection{Report Organization}
+
+The remainder of this report is organized as follows:
+
+\textbf{Section~\ref{sec:background}} reviews NS-3's WiFi implementation, distributed simulation principles, and related work in parallel network simulation.
+
+\textbf{Section~\ref{sec:architecture}} details our system architecture, including the centralized channel processor design, MPI message protocol, and communication flows.
+
+\textbf{Section~\ref{sec:hybrid}} presents the hybrid monitoring approach that enables PCAP capture in distributed scenarios.
+
+\textbf{Section~\ref{sec:implementation}} discusses implementation details including packet serialization, position management, and propagation model integration.
+
+\textbf{Section~\ref{sec:scenarios}} describes our comprehensive test scenarios: home WiFi, home WiFi with PCAP, and V2X vehicular communication.
+
+\textbf{Section~\ref{sec:results}} presents experimental results from multi-machine execution on AWS EC2, including traffic analysis, PCAP validation, and performance metrics.
+
+\textbf{Section~\ref{sec:validation}} details our verification methodology and correctness validation.
+
+\textbf{Section~\ref{sec:discussion}} analyzes design trade-offs, scalability characteristics, and applicability.
+
+\textbf{Section~\ref{sec:future}} outlines future enhancements and research directions.
+
+\textbf{Section~\ref{sec:conclusion}} summarizes our contributions and their significance.
+
+Appendices provide installation instructions, complete code listings, MPI command references, and PCAP analysis guides.

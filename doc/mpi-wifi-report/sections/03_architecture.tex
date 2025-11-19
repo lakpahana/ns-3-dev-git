@@ -1,0 +1,431 @@
+\section{System Architecture}
+\label{sec:architecture}
+
+\subsection{Design Overview}
+
+Our distributed MPI WiFi architecture follows a centralized-channel, distributed-devices pattern. Figure~\ref{fig:architecture-overview} illustrates the high-level design:
+
+\begin{figure}[htbp]
+\centering
+\begin{verbatim}
+┌──────────────────────────────────────────────────────────────┐
+│                     RANK 0: Channel Processor                 │
+│  ┌────────────────────────────────────────────────────────┐  │
+│  │         WifiChannelMpiProcessor                        │  │
+│  │  - Maintains global device registry                    │  │
+│  │  - Receives TX_REQUEST messages                        │  │
+│  │  - Calculates propagation (loss + delay)               │  │
+│  │  - Sends RX_NOTIFICATION to receivers                  │  │
+│  └────────────────────────────────────────────────────────┘  │
+│         ▲                │                │          ▲        │
+│         │ TX_REQUEST     │ RX_NOTIFY      │          │        │
+└─────────┼────────────────┼────────────────┼──────────┼────────┘
+          │                │                │          │
+    ┌─────┴─────┐    ┌─────▼──────┐   ┌────▼─────┐  │
+    │           │    │            │   │          │  │
+┌───▼───────────▼────▼────────────▼───▼──────────▼──▼─────────┐
+│              RANKS 1-N: Device Processors                     │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐       │
+│  │  Node 1      │  │  Node 2      │  │  Node n      │       │
+│  │ ┌──────────┐ │  │ ┌──────────┐ │  │ ┌──────────┐ │       │
+│  │ │WiFi App  │ │  │ │WiFi App  │ │  │ │WiFi App  │ │       │
+│  │ └────┬─────┘ │  │ └────┬─────┘ │  │ └────┬─────┘ │       │
+│  │ ┌────▼─────┐ │  │ ┌────▼─────┐ │  │ ┌────▼─────┐ │       │
+│  │ │WiFi MAC  │ │  │ │WiFi MAC  │ │  │ │WiFi MAC  │ │       │
+│  │ └────┬─────┘ │  │ └────┬─────┘ │  │ └────┬─────┘ │       │
+│  │ ┌────▼─────┐ │  │ ┌────▼─────┐ │  │ ┌────▼─────┐ │       │
+│  │ │WiFi PHY  │ │  │ │WiFi PHY  │ │  │ │WiFi PHY  │ │       │
+│  │ └────┬─────┘ │  │ └────┬─────┘ │  │ └────┬─────┘ │       │
+│  │ ┌────▼───────────────────────────────────▼─────┐ │       │
+│  │ │  RemoteYansWifiChannelStub (MPI Proxy)       │ │       │
+│  │ │  - Intercepts Send() calls                   │ │       │
+│  │ │  - Serializes to MPI messages                │ │       │
+│  │ │  - Receives RX notifications                 │ │       │
+│  │ └──────────────────────────────────────────────┘ │       │
+│  └──────────────┘  └──────────────┘  └──────────────┘       │
+└───────────────────────────────────────────────────────────────┘
+\end{verbatim}
+\caption{Distributed MPI WiFi architecture overview}
+\label{fig:architecture-overview}
+\end{figure}
+
+\textbf{Design Rationale}: Rather than attempting to distribute the broadcast channel across machines (which would require complex consistency protocols), we embrace WiFi's inherent centralization. Rank 0 maintains the authoritative channel state, while device simulation—which includes protocol stack processing, application logic, and local state—is distributed across ranks 1 through N. This design:
+
+\begin{itemize}
+    \item Maintains channel correctness (single source of truth)
+    \item Enables device parallelism (independent protocol processing)
+    \item Simplifies synchronization (centralized decisions)
+    \item Scales well when computation is device-dominated rather than channel-dominated
+\end{itemize}
+
+\subsection{Core Components}
+
+\subsubsection{RemoteYansWifiChannelStub}
+
+The \texttt{RemoteYansWifiChannelStub} class acts as a local proxy for the remote channel processor. It inherits from \texttt{YansWifiChannel} to maintain API compatibility, but overrides key methods to use MPI communication:
+
+\begin{lstlisting}[style=cpp, caption={RemoteYansWifiChannelStub class declaration}]
+class RemoteYansWifiChannelStub : public YansWifiChannel
+{
+public:
+    RemoteYansWifiChannelStub();
+    virtual ~RemoteYansWifiChannelStub();
+    
+    // Configuration
+    void SetRemoteChannelRank(uint32_t rank);
+    void SetLocalDeviceRank(uint32_t rank);
+    
+    // Override YansWifiChannel methods
+    void Send(Ptr<YansWifiPhy> sender,
+              Ptr<const WifiPpdu> ppdu,
+              double txPowerDbm) override;
+    
+    void Add(Ptr<YansWifiPhy> phy) override;
+    
+private:
+    void SendDeviceRegistration(Ptr<YansWifiPhy> phy);
+    void SendTransmissionRequest(Ptr<YansWifiPhy> sender,
+                                 Ptr<const WifiPpdu> ppdu,
+                                 double txPowerDbm);
+    void ReceiveNotifications(); // MPI receive handler
+    
+    uint32_t m_channelRank;  // Rank 0
+    uint32_t m_localRank;     // This rank's ID
+    std::map<uint32_t, Ptr<YansWifiPhy>> m_phyMap;
+};
+\end{lstlisting}
+
+\paragraph{Device Registration}
+When a WiFi PHY is added via \texttt{Add()}, the stub sends a \texttt{DEVICE\_REGISTRATION} message to rank 0:
+
+\begin{lstlisting}[style=cpp, caption={Device registration flow}]
+void RemoteYansWifiChannelStub::Add(Ptr<YansWifiPhy> phy)
+{
+    uint32_t deviceId = m_phyMap.size();
+    m_phyMap[deviceId] = phy;
+    
+    // Get device position
+    Ptr<MobilityModel> mobility = phy->GetMobility();
+    Vector position = mobility->GetPosition();
+    
+    // Prepare MPI message
+    struct DeviceRegMsg {
+        uint32_t srcRank;
+        uint32_t deviceId;
+        double posX, posY, posZ;
+    } msg;
+    
+    msg.srcRank = m_localRank;
+    msg.deviceId = deviceId;
+    msg.posX = position.x;
+    msg.posY = position.y;
+    msg.posZ = position.z;
+    
+    // Send to channel processor
+    MPI_Send(&msg, sizeof(msg), MPI_BYTE,
+             m_channelRank, MSG_DEVICE_REG,
+             MPI_COMM_WORLD);
+             
+    NS_LOG_INFO("[RemoteYansWifiChannelStub] Device " 
+                << deviceId << " registered via MPI");
+}
+\end{lstlisting}
+
+\paragraph{Transmission Request}
+When a device transmits, \texttt{Send()} serializes the packet and metadata to MPI:
+
+\begin{lstlisting}[style=cpp, caption={Transmission request serialization}]
+void RemoteYansWifiChannelStub::Send(
+    Ptr<YansWifiPhy> sender,
+    Ptr<const WifiPpdu> ppdu,
+    double txPowerDbm)
+{
+    // Find sender device ID
+    uint32_t senderId = FindDeviceId(sender);
+    
+    // Get current position (for mobile devices)
+    Ptr<MobilityModel> mobility = sender->GetMobility();
+    Vector position = mobility->GetPosition();
+    
+    // Serialize packet
+    Ptr<Packet> packet = ppdu->GetPacket()->Copy();
+    uint32_t packetSize = packet->GetSize();
+    uint8_t *buffer = new uint8_t[packetSize];
+    packet->CopyData(buffer, packetSize);
+    
+    // Prepare TX request message
+    struct TxRequestMsg {
+        uint32_t srcRank;
+        uint32_t deviceId;
+        double txPowerDbm;
+        double posX, posY, posZ;
+        uint64_t timestamp; // Simulation time
+        uint32_t packetSize;
+        // Followed by packet data
+    } msg;
+    
+    msg.srcRank = m_localRank;
+    msg.deviceId = senderId;
+    msg.txPowerDbm = txPowerDbm;
+    msg.posX = position.x;
+    msg.posY = position.y;
+    msg.posZ = position.z;
+    msg.timestamp = Simulator::Now().GetNanoSeconds();
+    msg.packetSize = packetSize;
+    
+    // Send header + payload
+    MPI_Send(&msg, sizeof(msg), MPI_BYTE,
+             m_channelRank, MSG_TX_REQUEST,
+             MPI_COMM_WORLD);
+    MPI_Send(buffer, packetSize, MPI_BYTE,
+             m_channelRank, MSG_TX_PAYLOAD,
+             MPI_COMM_WORLD);
+    
+    delete[] buffer;
+    
+    NS_LOG_INFO("[RemoteYansWifiChannelStub] TX request sent: "
+                << "Device " << senderId 
+                << ", Power " << txPowerDbm << " dBm");
+}
+\end{lstlisting}
+
+\subsubsection{WifiChannelMpiProcessor}
+
+The \texttt{WifiChannelMpiProcessor} runs on rank 0 and handles all channel computations:
+
+\begin{lstlisting}[style=cpp, caption={WifiChannelMpiProcessor class declaration}]
+class WifiChannelMpiProcessor : public Object
+{
+public:
+    WifiChannelMpiProcessor();
+    virtual ~WifiChannelMpiProcessor();
+    
+    void SetPropagationLossModel(
+        Ptr<PropagationLossModel> loss);
+    void SetPropagationDelayModel(
+        Ptr<PropagationDelayModel> delay);
+    
+    void Run(); // Main processing loop
+    
+private:
+    void HandleDeviceRegistration();
+    void HandleTransmissionRequest();
+    void ProcessTransmission(TxRequestMsg& tx);
+    void SendRxNotification(uint32_t destRank,
+                           uint32_t destDevice,
+                           const Packet& pkt,
+                           double rxPowerDbm,
+                           Time delay);
+    
+    struct DeviceInfo {
+        uint32_t rank;
+        uint32_t deviceId;
+        Vector position;
+    };
+    
+    std::map<std::pair<uint32_t,uint32_t>, DeviceInfo> 
+        m_devices; // Key: (rank, deviceId)
+    
+    Ptr<PropagationLossModel> m_lossModel;
+    Ptr<PropagationDelayModel> m_delayModel;
+};
+\end{lstlisting}
+
+\paragraph{Processing Loop}
+The channel processor runs a message-processing loop:
+
+\begin{lstlisting}[style=cpp, caption={Channel processor main loop}]
+void WifiChannelMpiProcessor::Run()
+{
+    NS_LOG_INFO("WifiChannelMpiProcessor started on rank 0");
+    
+    while (Simulator::Now() < Simulator::GetMaximumSimulationTime())
+    {
+        // Check for incoming MPI messages (non-blocking)
+        MPI_Status status;
+        int flag;
+        MPI_Iprobe(MPI_ANY_SOURCE, MPI_ANY_TAG,
+                   MPI_COMM_WORLD, &flag, &status);
+        
+        if (flag) {
+            switch (status.MPI_TAG) {
+                case MSG_DEVICE_REG:
+                    HandleDeviceRegistration();
+                    break;
+                    
+                case MSG_TX_REQUEST:
+                    HandleTransmissionRequest();
+                    break;
+            }
+        }
+        
+        // Process next simulation event
+        Simulator::RunOneEvent();
+    }
+}
+\end{lstlisting}
+
+\paragraph{Transmission Processing}
+For each transmission request, the processor calculates propagation to all registered devices:
+
+\begin{lstlisting}[style=cpp, caption={Transmission processing and propagation}]
+void WifiChannelMpiProcessor::ProcessTransmission(
+    TxRequestMsg& tx)
+{
+    // Sender info
+    Vector txPos(tx.posX, tx.posY, tx.posZ);
+    auto senderKey = std::make_pair(tx.srcRank, tx.deviceId);
+    
+    NS_LOG_INFO("Processing TX from rank " << tx.srcRank
+                << ", device " << tx.deviceId
+                << " at power " << tx.txPowerDbm << " dBm");
+    
+    // Calculate propagation to all receivers
+    for (auto& [key, rxDevice] : m_devices)
+    {
+        // Skip sender
+        if (key == senderKey) continue;
+        
+        Vector rxPos = rxDevice.position;
+        
+        // Calculate path loss
+        double rxPowerDbm = m_lossModel->CalcRxPower(
+            tx.txPowerDbm, txPos, rxPos);
+        
+        // Calculate propagation delay
+        Time delay = m_delayModel->GetDelay(txPos, rxPos);
+        
+        // Send RX notification to receiver's rank
+        SendRxNotification(rxDevice.rank,
+                          rxDevice.deviceId,
+                          tx.packet,
+                          rxPowerDbm,
+                          delay);
+        
+        NS_LOG_DEBUG("  -> Receiver rank " << rxDevice.rank
+                     << ", device " << rxDevice.deviceId
+                     << ": RX power " << rxPowerDbm << " dBm, "
+                     << "delay " << delay.GetMicroSeconds() << " μs");
+    }
+}
+\end{lstlisting}
+
+\subsection{MPI Message Protocol}
+
+Our protocol uses three primary message types, detailed in Table~\ref{tab:mpi-messages}:
+
+\begin{table}[htbp]
+\centering
+\caption{MPI message types and payloads}
+\label{tab:mpi-messages}
+\begin{tabular}{@{}llp{6cm}@{}}
+\toprule
+\textbf{Message Type} & \textbf{Direction} & \textbf{Payload} \\
+\midrule
+\texttt{DEVICE\_REG} & Device→Channel & Source rank, device ID, position (x,y,z) \\
+\texttt{TX\_REQUEST} & Device→Channel & Source rank, device ID, TX power (dBm), position, timestamp, packet size, packet data \\
+\texttt{RX\_NOTIFICATION} & Channel→Device & Destination rank, device ID, RX power (dBm), propagation delay, packet size, packet data \\
+\texttt{MOBILITY\_UPDATE} & Device→Channel & Source rank, device ID, new position (x,y,z), velocity \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Communication Flow}
+
+Figure~\ref{fig:sequence-diagram} shows the complete sequence for a packet transmission:
+
+\begin{figure}[htbp]
+\centering
+\begin{verbatim}
+Device (Rank 1)         Stub (Rank 1)         Processor (Rank 0)      Stub (Rank 2)      Device (Rank 2)
+     │                       │                        │                      │                  │
+     │ Send()                │                        │                      │                  │
+     ├──────────────────────>│                        │                      │                  │
+     │                       │ TX_REQUEST             │                      │                  │
+     │                       ├───────────────────────>│                      │                  │
+     │                       │  (packet + metadata)   │                      │                  │
+     │                       │                        │                      │                  │
+     │                       │                   Calc propagation            │                  │
+     │                       │                   to all receivers            │                  │
+     │                       │                        │                      │                  │
+     │                       │                        │ RX_NOTIFICATION      │                  │
+     │                       │                        ├─────────────────────>│                  │
+     │                       │                        │  (packet + RX power) │                  │
+     │                       │                        │                      │                  │
+     │                       │                        │                      │ StartReceive()   │
+     │                       │                        │                      ├─────────────────>│
+     │                       │                        │                      │                  │
+     │                       │                        │                      │                  │ MAC processing
+     │                       │                        │                      │                  │ Frame reception
+     │                       │                        │                      │                  │ Deliver to app
+\end{verbatim}
+\caption{Sequence diagram for packet transmission}
+\label{fig:sequence-diagram}
+\end{figure}
+
+\textbf{Key Observations}:
+\begin{enumerate}
+    \item \textbf{Synchronous TX→RX}: The transmission completes on rank 1 before RX notification arrives at rank 2, preserving causality
+    \item \textbf{Centralized decisions}: All propagation calculations occur at rank 0, ensuring consistency
+    \item \textbf{Transparent to upper layers}: WiFi MAC/PHY layers see standard \texttt{StartReceive()} calls, unaware of MPI
+    \item \textbf{Scalable device processing}: While rank 0 calculates propagation, devices on ranks 1-N independently process MAC/PHY protocols
+\end{enumerate}
+
+\subsection{Time Synchronization}
+
+Our implementation leverages NS-3's \texttt{DistributedSimulator} for time management. The distributed simulator ensures:
+
+\begin{itemize}
+    \item \textbf{Null message protocol}: Ranks periodically exchange messages indicating their local time advancement
+    \item \textbf{LBTS calculation}: Each rank computes its Lower Bound on Time Stamp—the earliest possible timestamp of future remote messages
+    \item \textbf{Safe event processing}: A rank processes local events only up to its LBTS
+    \item \textbf{Lookahead}: WiFi packet transmission times provide natural lookahead (microseconds to milliseconds)
+\end{itemize}
+
+This conservative approach guarantees causality without rollback mechanisms, aligning with NS-3's existing MPI framework.
+
+\subsection{Design Decisions and Trade-offs}
+
+\subsubsection{Centralized vs. Distributed Channel}
+
+\paragraph{Decision: Centralized channel processor on rank 0}
+
+\paragraph{Rationale}:
+\begin{itemize}
+    \item WiFi's broadcast nature resists spatial partitioning
+    \item Centralization eliminates consistency problems
+    \item Matches NS-3's \texttt{YansWifiChannel} model
+    \item Simplifies debugging and validation
+\end{itemize}
+
+\paragraph{Trade-off}:
+Rank 0 becomes a potential bottleneck. However, propagation calculations are relatively lightweight (microseconds per device pair) compared to device-side processing (full protocol stack). For scenarios with 200 devices and 10 Hz beacons, rank 0 performs ~400K calculations/second—easily handled by modern CPUs.
+
+\subsubsection{Synchronous vs. Asynchronous MPI}
+
+\paragraph{Decision: Synchronous message passing}
+
+\paragraph{Rationale}:
+\begin{itemize}
+    \item Matches NS-3's discrete event semantics
+    \item Simpler implementation (no message buffering complexity)
+    \item Causality guaranteed by construction
+    \item Aligns with conservative synchronization
+\end{itemize}
+
+\paragraph{Trade-off}:
+Potential communication latency. Asynchronous MPI could hide latency but requires careful buffering and synchronization. Our measurements (Section~\ref{sec:results}) show synchronous MPI adds acceptable overhead.
+
+\subsubsection{Static vs. Dynamic Device Distribution}
+
+\paragraph{Decision: Static assignment of devices to ranks}
+
+\paragraph{Rationale}:
+\begin{itemize}
+    \item Simpler implementation (no migration protocol)
+    \item Predictable performance characteristics
+    \item Sufficient for many scenarios (highway lanes, building floors, network segments)
+\end{itemize}
+
+\paragraph{Trade-off}:
+Cannot adapt to load imbalance. Future work could explore dynamic redistribution based on runtime profiling.

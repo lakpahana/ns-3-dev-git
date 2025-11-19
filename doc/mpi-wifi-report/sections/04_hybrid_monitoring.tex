@@ -1,0 +1,283 @@
+\section{Hybrid MPI + Local Monitoring Approach}
+\label{sec:hybrid}
+
+\subsection{The PCAP Capture Challenge}
+
+A critical but often overlooked aspect of network simulation is \textit{observability}—the ability to inspect and analyze protocol behavior. Researchers rely heavily on packet capture (PCAP) files to:
+
+\begin{itemize}
+    \item Validate protocol implementations against standards
+    \item Debug unexpected behavior through packet-level inspection
+    \item Analyze traffic patterns and timing characteristics
+    \item Generate publication-quality protocol traces
+    \item Demonstrate correctness to reviewers and collaborators
+\end{itemize}
+
+NS-3's WiFi module provides excellent PCAP support through the \texttt{YansWifiPhyHelper::EnablePcap()} method, which captures all frames at the PHY layer including 802.11 management frames, control frames, and data frames with complete headers.
+
+However, our MPI-based approach creates a fundamental problem: \textbf{MPI stubs don't generate local WiFi frames}. When \texttt{RemoteYansWifiChannelStub::Send()} is called, instead of transmitting a packet through a local WiFi channel (which PCAP could capture), it serializes the packet into an MPI message and sends it to rank 0. The packet never appears on a local network interface—it's transmitted as an opaque byte buffer between processes. Standard PCAP mechanisms capture nothing.
+
+This creates an unacceptable situation: distributed simulations gain performance but lose observability. Researchers must choose between scalability and debuggability.
+
+\subsection{Dual-Network Solution}
+
+We solve this problem through a \textit{hybrid architecture} where each device simultaneously participates in two independent networks, as shown in Figure~\ref{fig:hybrid-architecture}:
+
+\begin{figure}[htbp]
+\centering
+\begin{verbatim}
+┌─────────────────────────────────────────────────────────────────┐
+│                    Device Node (e.g., Rank 1)                   │
+│                                                                  │
+│  ┌────────────────────────────────────────────────────────────┐ │
+│  │                  Application Layer                          │ │
+│  │         (UDP Echo Client/Server, OnOff, etc.)              │ │
+│  └──────────────────────┬─────────────────┬───────────────────┘ │
+│                         │                 │                      │
+│            ┌────────────▼─────┐    ┌─────▼──────────┐          │
+│            │ IP Stack 1       │    │ IP Stack 2     │          │
+│            │ 192.168.x.x      │    │ 10.x.x.x       │          │
+│            └────────┬─────────┘    └──────┬─────────┘          │
+│                     │                      │                     │
+│      ┌──────────────▼──────────┐  ┌───────▼──────────────┐     │
+│      │  WiFi Device 0          │  │  WiFi Device 1        │     │
+│      │  (MPI Performance)      │  │  (Local Monitoring)   │     │
+│      ├─────────────────────────┤  ├───────────────────────┤     │
+│      │  MAC: AdHoc Mode        │  │  MAC: AdHoc Mode      │     │
+│      │  PHY: High TX Power     │  │  PHY: Low TX Power    │     │
+│      └──────────┬──────────────┘  └──────┬────────────────┘     │
+│                 │                         │                      │
+│      ┌──────────▼────────────────┐  ┌────▼─────────────────┐   │
+│      │ RemoteYansWifiChannelStub │  │ YansWifiChannel      │   │
+│      │ -> MPI to Rank 0          │  │ (Local, Real Frames) │   │
+│      │ -> High traffic (50Mbps)  │  │ -> PCAP Capture ✓    │   │
+│      │ -> No PCAP ✗              │  │ -> Light (1-5Mbps)   │   │
+│      └───────────────────────────┘  └──────────────────────┘   │
+└─────────────────────────────────────────────────────────────────┘
+\end{verbatim}
+\caption{Hybrid dual-network architecture for MPI + PCAP}
+\label{fig:hybrid-architecture}
+\end{figure}
+
+\paragraph{Network 1: MPI Performance Network}
+\begin{itemize}
+    \item Uses \texttt{RemoteYansWifiChannelStub}
+    \item High data rates (50 Mbps for streaming, 30 Mbps for gaming, etc.)
+    \item Distributed across machines via MPI
+    \item Tests scalability and multi-machine performance
+    \item IP subnet: 192.168.x.x (where x = rank ID)
+\end{itemize}
+
+\paragraph{Network 2: Local Monitoring Network}
+\begin{itemize}
+    \item Uses standard \texttt{YansWifiChannel}
+    \item Light traffic (1-5 Mbps) for protocol monitoring
+    \item Runs locally on each rank
+    \item Generates PCAP files with real 802.11 frames
+    \item IP subnet: 10.x.x.x (where x = rank ID)
+\end{itemize}
+
+\subsection{Implementation Details}
+
+\subsubsection{Dual Interface Configuration}
+
+Each simulated device gets two network interfaces:
+
+\begin{lstlisting}[style=cpp, caption={Dual-network device creation}]
+// Create MPI channel stub for performance testing
+Ptr<RemoteYansWifiChannelStub> mpiChannelStub = 
+    CreateObject<RemoteYansWifiChannelStub>();
+mpiChannelStub->SetRemoteChannelRank(0);
+mpiChannelStub->SetLocalDeviceRank(systemId);
+
+// Create local channel for PCAP capture
+YansWifiChannelHelper localChannelHelper = 
+    YansWifiChannelHelper::Default();
+localChannelHelper.AddPropagationLoss(
+    "ns3::LogDistancePropagationLossModel",
+    "Exponent", DoubleValue(3.0));
+Ptr<YansWifiChannel> localChannel = 
+    localChannelHelper.Create();
+
+// Configure WiFi PHY for both networks
+YansWifiPhyHelper mpiPhy, localPhy;
+mpiPhy.SetChannel(mpiChannelStub);
+localPhy.SetChannel(localChannel);
+
+// Create devices on both networks
+WifiHelper wifi;
+wifi.SetStandard(WIFI_STANDARD_80211n);
+WifiMacHelper mac;
+mac.SetType("ns3::AdhocWifiMac");
+
+NetDeviceContainer mpiDevices = 
+    wifi.Install(mpiPhy, mac, nodes);
+NetDeviceContainer localDevices = 
+    wifi.Install(localPhy, mac, nodes);
+
+// Enable PCAP only on local monitoring devices
+localPhy.EnablePcapAll("home-wifi-rank" + 
+                       std::to_string(systemId), true);
+\end{lstlisting}
+
+\subsubsection{IP Address Space Separation}
+
+The two networks use distinct IP subnets to avoid routing conflicts:
+
+\begin{lstlisting}[style=cpp, caption={Dual IP stack configuration}]
+InternetStackHelper stack;
+stack.Install(nodes);
+
+// MPI network addressing (192.168.x.0/24)
+Ipv4AddressHelper mpiAddress;
+std::ostringstream mpiSubnet;
+mpiSubnet << "192.168." << systemId << ".0";
+mpiAddress.SetBase(mpiSubnet.str().c_str(), 
+                   "255.255.255.0");
+Ipv4InterfaceContainer mpiInterfaces = 
+    mpiAddress.Assign(mpiDevices);
+
+// Local monitoring network (10.x.0.0/24)
+Ipv4AddressHelper localAddress;
+std::ostringstream localSubnet;
+localSubnet << "10." << systemId << ".0.0";
+localAddress.SetBase(localSubnet.str().c_str(), 
+                     "255.255.255.0");
+Ipv4InterfaceContainer localInterfaces = 
+    localAddress.Assign(localDevices);
+\end{lstlisting}
+
+\subsubsection{Traffic Distribution}
+
+Applications send different traffic on each network:
+
+\begin{lstlisting}[style=cpp, caption={Dual-network traffic generation}]
+// Heavy MPI traffic for performance testing (50 Mbps)
+OnOffHelper mpiTraffic("ns3::UdpSocketFactory",
+    InetSocketAddress(mpiInterfaces.GetAddress(1), 8080));
+mpiTraffic.SetAttribute("OnTime", 
+    StringValue("ns3::ConstantRandomVariable[Constant=1]"));
+mpiTraffic.SetAttribute("OffTime", 
+    StringValue("ns3::ConstantRandomVariable[Constant=0]"));
+mpiTraffic.SetAttribute("DataRate", DataRateValue(50000000));
+mpiTraffic.SetAttribute("PacketSize", UintegerValue(1400));
+
+ApplicationContainer mpiApp = mpiTraffic.Install(nodes.Get(0));
+mpiApp.Start(Seconds(2.0));
+mpiApp.Stop(Seconds(simTime - 1.0));
+
+// Light monitoring traffic for PCAP (5 Mbps)
+OnOffHelper localTraffic("ns3::UdpSocketFactory",
+    InetSocketAddress(localInterfaces.GetAddress(1), 9090));
+localTraffic.SetAttribute("DataRate", DataRateValue(5000000));
+localTraffic.SetAttribute("PacketSize", UintegerValue(1200));
+
+ApplicationContainer localApp = localTraffic.Install(nodes.Get(0));
+localApp.Start(Seconds(2.0));
+localApp.Stop(Seconds(simTime - 1.0));
+\end{lstlisting}
+
+\subsection{Traffic Patterns and Synchronization}
+
+The dual networks operate independently but share the same simulation timeline:
+
+\begin{itemize}
+    \item \textbf{Same devices}: Each node participates in both networks
+    \item \textbf{Same mobility}: Position updates affect both channels
+    \item \textbf{Independent applications}: Different traffic generators
+    \item \textbf{Synchronized time}: Both use the same \texttt{Simulator} clock
+\end{itemize}
+
+For example, in our home WiFi scenario:
+\begin{itemize}
+    \item \textbf{Smart TV}: 50 Mbps on MPI network (performance test) + 5 Mbps on local network (PCAP)
+    \item \textbf{IoT devices}: 1 Mbps on MPI network + 1 Mbps on local network
+\end{itemize}
+
+\subsection{Benefits of Hybrid Approach}
+
+\subsubsection{Performance + Observability}
+
+Researchers get both capabilities:
+\begin{itemize}
+    \item \textbf{MPI network}: Tests system scalability with realistic traffic loads across machines
+    \item \textbf{Local network}: Provides detailed protocol traces for analysis
+\end{itemize}
+
+\subsubsection{Debugging Distributed Scenarios}
+
+When distributed simulations encounter problems, PCAP files reveal:
+\begin{itemize}
+    \item Whether packets are formed correctly (802.11 headers, frame types)
+    \item MAC-level behavior (RTS/CTS, ACK, Block ACK)
+    \item Timing issues (backoff, collision avoidance)
+    \item Protocol state machines (authentication, association for infrastructure mode)
+\end{itemize}
+
+\subsubsection{Validation Against Standards}
+
+Captured frames can be compared against IEEE 802.11 standards to validate:
+\begin{itemize}
+    \item Frame formats and field values
+    \item Management frame sequences
+    \item Error handling procedures
+    \item Rate adaptation behavior
+\end{itemize}
+
+\subsubsection{Publication-Quality Traces}
+
+PCAP files can be:
+\begin{itemize}
+    \item Opened in Wireshark for visual analysis
+    \item Processed with \texttt{tcpdump} for statistics
+    \item Converted to publication figures showing protocol exchanges
+    \item Shared with reviewers to demonstrate correctness
+\end{itemize}
+
+\subsection{Performance Impact}
+
+The hybrid approach adds overhead from:
+\begin{enumerate}
+    \item Additional network interface per device
+    \item Duplicate MAC/PHY processing
+    \item PCAP file I/O
+\end{enumerate}
+
+However, our measurements (Section~\ref{sec:results}) show this is acceptable:
+\begin{itemize}
+    \item Light monitoring traffic (1-5 Mbps) adds minimal computational load
+    \item PCAP writes are buffered and asynchronous
+    \item Memory increase is proportional to device count (not O(n²))
+\end{itemize}
+
+For our 8-device home WiFi scenario, the overhead is:
+\begin{itemize}
+    \item CPU: <10\% increase compared to MPI-only
+    \item Memory: ~50 MB additional per rank for PCAP buffers
+    \item Disk: 50-200 MB PCAP files per device (valuable for analysis)
+\end{itemize}
+
+\subsection{Alternative Considered}
+
+\paragraph{Post-Processing Approach}
+An alternative would be logging MPI messages and reconstructing PCAP files post-simulation. However, this requires:
+\begin{itemize}
+    \item Custom logging format
+    \item Complete MPI message capture (storage overhead)
+    \item Complex reconstruction logic
+    \item Loss of real-time debugging capability
+\end{itemize}
+
+Our dual-network approach generates standard PCAP files in real-time, compatible with existing analysis tools, at acceptable computational cost.
+
+\subsection{Applicability}
+
+The hybrid approach is most beneficial when:
+\begin{itemize}
+    \item Validating new protocols or implementations
+    \item Debugging unexpected distributed behavior
+    \item Demonstrating correctness to reviewers
+    \item Teaching/demonstrating WiFi protocols
+\end{itemize}
+
+For pure performance testing without protocol analysis, the MPI network alone suffices. The architecture allows easy switching between modes.

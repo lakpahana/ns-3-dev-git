@@ -1,0 +1,212 @@
+\section{Background and Related Work}
+\label{sec:background}
+
+\subsection{NS-3 Simulator Architecture}
+
+NS-3 is a discrete-event network simulator designed for research and educational purposes~\cite{ns3}. Unlike its predecessor NS-2, NS-3 is implemented entirely in C++ with optional Python bindings, providing strong typing, better performance, and closer alignment with real-world protocol implementations.
+
+\subsubsection{Discrete Event Simulation Model}
+
+NS-3 employs a discrete-event simulation paradigm where the system state changes only at discrete points in time when events occur. The core scheduling mechanism maintains a future event list (FEL) ordered by simulation time. The simulator processes events in chronological order, ensuring strict causality: an event at time $t$ cannot affect events at time $t' < t$.
+
+The simulation proceeds as follows:
+\begin{enumerate}
+    \item Extract the earliest event $e$ from the FEL
+    \item Advance simulation time to $e$.time
+    \item Execute $e$.handler(), which may:
+    \begin{itemize}
+        \item Modify simulation state
+        \item Schedule new events in the FEL
+        \item Generate output/statistics
+    \end{itemize}
+    \item Repeat until FEL is empty or stop time is reached
+\end{enumerate}
+
+This model provides reproducible, deterministic results independent of real-time execution speed, making it ideal for controlled experiments.
+
+\subsubsection{WiFi Module Architecture}
+
+NS-3's WiFi module implements the IEEE 802.11 protocol stack with high fidelity to the standard. The architecture follows a layered design, as illustrated in Figure~\ref{fig:ns3-wifi-stack}:
+
+\begin{figure}[htbp]
+\centering
+\begin{verbatim}
+┌─────────────────────────────────────┐
+│     Application Layer               │
+│  (UDP/TCP Applications)             │
+└─────────────────┬───────────────────┘
+                  │
+┌─────────────────▼───────────────────┐
+│     Network Layer (IPv4/IPv6)       │
+└─────────────────┬───────────────────┘
+                  │
+┌─────────────────▼───────────────────┐
+│     WiFi MAC (802.11 DCF/EDCA)     │
+│  - Frame aggregation (A-MPDU)       │
+│  - Block ACK                        │
+│  - Rate adaptation                  │
+└─────────────────┬───────────────────┘
+                  │
+┌─────────────────▼───────────────────┐
+│     WiFi PHY Layer                  │
+│  - OFDM/DSSS modulation            │
+│  - Error rate models                │
+│  - Energy detection                 │
+└─────────────────┬───────────────────┘
+                  │
+┌─────────────────▼───────────────────┐
+│     WiFi Channel                    │
+│  - Propagation loss models          │
+│  - Delay models                     │
+│  - Multi-device broadcast           │
+└─────────────────────────────────────┘
+\end{verbatim}
+\caption{NS-3 WiFi protocol stack architecture}
+\label{fig:ns3-wifi-stack}
+\end{figure}
+
+\paragraph{YansWifiChannel}
+The \texttt{YansWifiChannel} class (Yet Another Network Simulator WiFi Channel) is NS-3's primary WiFi channel implementation. When a device transmits:
+
+\begin{lstlisting}[style=cpp, caption={YansWifiChannel transmission logic (simplified)}]
+void YansWifiChannel::Send(Ptr<YansWifiPhy> sender,
+                           Ptr<const WifiPpdu> ppdu,
+                           double txPowerDbm)
+{
+    // Get sender position
+    Ptr<MobilityModel> senderMobility = sender->GetMobility();
+    
+    // Iterate over all PHYs on this channel
+    for (auto receiver : m_phyList)
+    {
+        if (receiver == sender) continue; // Skip self
+        
+        // Calculate propagation delay
+        Ptr<MobilityModel> receiverMobility = 
+            receiver->GetMobility();
+        Time delay = m_delay->GetDelay(
+            senderMobility, receiverMobility);
+        
+        // Calculate received power
+        double rxPowerDbm = m_loss->CalcRxPower(
+            txPowerDbm, senderMobility, receiverMobility);
+        
+        // Schedule reception at receiver
+        Simulator::Schedule(delay, 
+            &YansWifiPhy::StartReceivePreamble,
+            receiver, ppdu, rxPowerDbm);
+    }
+}
+\end{lstlisting}
+
+This broadcast nature—where each transmission invokes calculations for every potential receiver—creates the O(n²) complexity that limits scalability.
+
+\subsection{MPI and Distributed Simulation}
+
+\subsubsection{Message Passing Interface (MPI)}
+
+MPI is a standardized message-passing library interface specification, implemented by various libraries (OpenMPI, MPICH, Intel MPI)~\cite{mpi-standard}. MPI provides:
+
+\begin{itemize}
+    \item \textbf{Point-to-point communication}: \texttt{MPI\_Send()}, \texttt{MPI\_Recv()}
+    \item \textbf{Collective operations}: \texttt{MPI\_Broadcast()}, \texttt{MPI\_Reduce()}
+    \item \textbf{Synchronization primitives}: \texttt{MPI\_Barrier()}
+    \item \textbf{Process topology}: Rank identification, communicator groups
+\end{itemize}
+
+MPI programs execute as multiple processes (ranks) that communicate via message passing. Each rank has a unique identifier from 0 to $n-1$ where $n$ is the total process count.
+
+\subsubsection{Parallel Discrete Event Simulation (PDES)}
+
+Distributing discrete event simulation across multiple machines requires solving the time synchronization problem. Two main approaches exist:
+
+\paragraph{Conservative Synchronization}
+Conservative protocols~\cite{chandy-misra} guarantee causality by processing events only when it's safe—i.e., when no earlier event could arrive from other processors. This requires "lookahead": knowledge of the minimum timestamp of future messages. The Chandy-Misra-Bryant algorithm uses null messages to communicate time advancement.
+
+\paragraph{Optimistic Synchronization}
+Optimistic protocols like Time Warp~\cite{jefferson-timewarp} allow processors to execute events speculatively. If a causality violation is detected (an event arrives with an earlier timestamp than already-processed events), the simulator rolls back state and re-executes. This requires state saving and rollback mechanisms but can achieve better performance when violations are rare.
+
+\subsubsection{NS-3 MPI Support}
+
+NS-3 provides distributed simulation capability through its \texttt{MpiInterface} class and \texttt{DistributedSimulator}~\cite{ns3-mpi}. The implementation uses:
+
+\begin{itemize}
+    \item \textbf{Conservative synchronization}: Null message protocol with configurable lookahead
+    \item \textbf{Logical processes}: Each MPI rank runs an independent \texttt{DistributedSimulator} instance
+    \item \textbf{Time synchronization}: LBTS (Lower Bound on Time Stamp) calculation ensures causality
+    \item \textbf{Remote channels}: \texttt{PointToPointRemoteChannel} for distributed wired links
+\end{itemize}
+
+Key NS-3 MPI concepts:
+
+\begin{lstlisting}[style=cpp, caption={NS-3 MPI initialization example}]
+#include "ns3/mpi-interface.h"
+
+int main(int argc, char *argv[])
+{
+    // Initialize MPI
+    MpiInterface::Enable(&argc, &argv);
+    
+    uint32_t systemId = MpiInterface::GetSystemId();
+    uint32_t systemCount = MpiInterface::GetSize();
+    
+    // Create topology specific to this rank
+    if (systemId == 0) {
+        // Rank 0 logic
+    } else {
+        // Other ranks logic
+    }
+    
+    // Simulation runs with time synchronization
+    Simulator::Stop(Seconds(simTime));
+    Simulator::Run();
+    Simulator::Destroy();
+    
+    // Clean up MPI
+    MpiInterface::Disable();
+    return 0;
+}
+\end{lstlisting}
+
+\subsection{Related Work}
+
+\subsubsection{Distributed Wired Network Simulation}
+
+NS-3's \texttt{PointToPointRemoteChannel} enables distributed simulation of wired networks~\cite{ns3-mpi}. This implementation partitions topology across ranks, with remote channels connecting nodes on different machines. Point-to-point links have well-defined endpoints, making partitioning straightforward. Our WiFi implementation draws inspiration from this design but must address WiFi's broadcast nature.
+
+\subsubsection{Parallel Wireless Simulation}
+
+Several systems have addressed parallel wireless simulation:
+
+\paragraph{JiST/SWANS}
+Java in Simulation Time (JiST) with Scalable Wireless Ad hoc Network Simulator (SWANS)~\cite{barr-jist} achieved high scalability through:
+\begin{itemize}
+    \item Rewriting Java bytecode to intercept blocking operations
+    \item Hierarchical spatial indexing for efficient neighbor discovery  
+    \item Field partitioning to distribute devices spatially
+\end{itemize}
+
+However, JiST's approach requires Java and doesn't integrate with NS-3's C++ codebase.
+
+\paragraph{GTNetS}
+Georgia Tech Network Simulator~\cite{gtnet-parallel} explored optimistic synchronization for wireless networks. It demonstrated speedups but required careful tuning to avoid excessive rollbacks in dense wireless scenarios where many events occur in tight temporal proximity.
+
+\paragraph{PRIME SSFNet}
+PRIME's SSFNet~\cite{prime-wireless} used conservative synchronization with spatial partitioning. Wireless transmissions crossing partition boundaries required inter-processor communication. Performance degraded when mobile devices frequently crossed boundaries.
+
+\subsubsection{NS-3 LTE MPI Implementations}
+
+The NS-3 LTE module includes experimental MPI support~\cite{ns3-lte-mpi}. LTE's cellular architecture naturally partitions: eNodeBs (base stations) can be distributed across ranks with minimal inter-rank communication for handovers. This provides a reference for integrating MPI with NS-3 wireless modules but doesn't directly address WiFi's peer-to-peer broadcast model.
+
+\subsection{Gap Analysis}
+
+Existing approaches have limitations for large-scale WiFi simulation:
+
+\begin{itemize}
+    \item \textbf{Spatial partitioning} works poorly for dense WiFi deployments where all devices are within communication range (e.g., vehicular networks, enterprise WiFi)
+    \item \textbf{Optimistic synchronization} suffers from frequent rollbacks due to WiFi's rapid event rates and broadcast nature
+    \item \textbf{Existing NS-3 MPI support} targets wired networks; no production-ready WiFi MPI implementation exists
+    \item \textbf{Observability gap}: No prior work addresses PCAP capture in distributed wireless simulation
+\end{itemize}
+
+Our work fills these gaps by embracing WiFi's centralized broadcast nature, using conservative synchronization aligned with NS-3's existing MPI framework, and introducing a hybrid approach for observability.
